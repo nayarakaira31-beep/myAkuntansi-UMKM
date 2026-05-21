@@ -34,6 +34,7 @@ const TABS = [
   { id:"dashboard", label:"Dashboard", icon:"📊" },
   { id:"transaksi", label:"Transaksi", icon:"💳" },
   { id:"laporan", label:"Laporan", icon:"📋" },
+  { id:"asisten", label:"AI Asisten", icon:"🤖" },
 ];
 
 export default function App() {
@@ -45,6 +46,12 @@ export default function App() {
   const [filterType, setFilterType] = useState("semua");
   const [filterMonth, setFilterMonth] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean, text: string } | null>(null);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+
+  // States for AI Prompt feature
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [aiChatHistory, setAiChatHistory] = useState<{ id: string; timestamp: string; role: 'user' | 'ai'; content: string }[]>([]);
 
   const availableMonths = useMemo(() => {
     const m = new Set(txns.map(t => t.date.substring(0, 7)));
@@ -121,6 +128,89 @@ export default function App() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleAskAI = () => {
+    if (aiPrompt.trim() === "") return;
+    
+    setIsAiLoading(true);
+    const now = new Date();
+    const timestamp = now.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + " · " + now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+    
+    const promptText = aiPrompt;
+    const userMsg = { id: Date.now().toString(), timestamp, role: 'user' as const, content: promptText };
+    setAiChatHistory(prev => [...prev, userMsg]);
+    setAiPrompt("");
+
+    setTimeout(() => {
+      let teksKecil = promptText.toLowerCase();
+      let hasilJawaban = "";
+      
+      const detectTopic = (text: string) => {
+        if (text.includes("evaluasi") || text.includes("analisis") || text.includes("insight") || text.includes("saran") || text.includes("keputusan")) return "evaluasi";
+        if (text.includes("kas") || text.includes("uang") || text.includes("saldo")) return "kas";
+        if (text.includes("laba") || text.includes("rugi") || text.includes("keuntungan")) return "laba";
+        if (text.includes("piutang") || text.includes("tagihan") || text.includes("belum") || text.includes("bayar")) return "piutang";
+        if (text.includes("pengeluaran") || text.includes("beban") || text.includes("biaya") || text.includes("keluar") || text.includes("habis")) return "pengeluaran";
+        if (text.includes("pemasukan") || text.includes("pendapatan") || text.includes("masuk") || text.includes("terima")) return "pemasukan";
+        if (text.includes("transaksi")) return "transaksi";
+        return null;
+      };
+
+      let activeTopic = detectTopic(teksKecil);
+
+      // Konteks memori percakapan: inferensi dari percakapan sebelumnya jika pertanyaan saat ini ambigu
+      if (!activeTopic && aiChatHistory.length > 0) {
+        for (let i = aiChatHistory.length - 1; i >= 0; i--) {
+          const pastTopic = detectTopic(aiChatHistory[i].content.toLowerCase());
+          if (pastTopic) {
+             const isContinuation = teksKecil.includes("lalu") || teksKecil.includes("bagaimana") || teksKecil.includes("kalau") || teksKecil.includes("jelaskan") || teksKecil.includes("detail") || teksKecil.includes("terus") || teksKecil.includes("bulan ini") || teksKecil.includes("hari ini");
+             if (isContinuation || teksKecil.length < 20) { // Assume short prompts without keywords are continuations
+               activeTopic = pastTopic;
+             }
+             break;
+          }
+        }
+      }
+      
+      if (activeTopic === "evaluasi") {
+          let advice = "";
+          let marginNum = (totalMasuk > 0 ? ((laba / totalMasuk) * 100) : 0);
+          if (laba > 0) {
+              if (marginNum >= 20) {
+                  advice = `Kondisi keuangan saat ini sangat sehat (margin keuntungan ${marginNum.toFixed(1)}%). Pertahankan efisiensi ini. Sebagai keputusan strategis, alokasikan sebagian laba ke dana cadangan atau investasi ekspansi usaha.`;
+              } else {
+                  advice = `Arus kas positif terbentuk, namun margin keuntungan di angka ${marginNum.toFixed(1)}%. Disarankan untuk mengevaluasi pos pengeluaran operasional yang masih bisa ditekan agar profitabilitas makin maksimal.`;
+              }
+          } else if (laba === 0) {
+              advice = `Keuangan Anda saat ini impas (Break Even). Sangat butuh fokus pada strategi pemasaran di periode mendatang dan evaluasi ulang target produk untuk bisa mencetak laba.`;
+          } else {
+              advice = `Perhatian besar, usaha mencatatkan kerugian / kas bersih negatif sebesar ${fmt(Math.abs(laba))}. Evaluasi mendesak: segera hentikan pengeluaran yang tidak esensial, negosiasi ulang hutang/piutang jika ada, dan temukan cara menggenjot penjualan.`;
+          }
+          hasilJawaban = `📊 Evaluasi & Keputusan Keuangan:\nBulan ini total pemasukan Anda ${fmt(totalMasuk)} dan pengeluaran ${fmt(totalKeluar)}.\n\nInsight: ${advice}`;
+      } else if (activeTopic === "kas") {
+          hasilJawaban = `Berdasarkan konteks pembicaraan kita mengenai Saldo Kas, total kas saat ini adalah ${fmt(laba)}. Angka ini didapat dari seluruh catatan transaksi di sistem.`;
+      } else if (activeTopic === "laba") {
+          hasilJawaban = `Terkait Laba/Rugi, laba bersih tercatat sebesar ${fmt(laba)}, ini dihitung dari kumulatif pendapatan dikurangi pengeluaran.`;
+      } else if (activeTopic === "piutang") {
+          hasilJawaban = `Untuk Tagihan/Piutang, terdapat nilai tagihan sebesar Rp 3.200.000 yang akan jatuh tempo minggu depan. (Data contoh)`;
+      } else if (activeTopic === "pengeluaran") {
+          hasilJawaban = `Membahas tentang Pengeluaran dan Biaya, total pencatatan saat ini sebesar ${fmt(totalKeluar)}. Pastikan Anda merencanakan efisiensi pengeluaran.`;
+      } else if (activeTopic === "pemasukan") {
+          hasilJawaban = `Membahas Pemasukan Anda, total pendapatan saat ini tercatat sebesar ${fmt(totalMasuk)}. Terus tingkatkan performa penjualan!`;
+      } else if (activeTopic === "transaksi") {
+          hasilJawaban = `Sistem mencatat sebanyak ${globalFilteredTxns.length} riwayat transaksi sejauh ini.`;
+      } else {
+          hasilJawaban = "Maaf, dari konteks pembicaraan kita, saya kurang memahami maksud spesifik Anda. Boleh diperjelas mengenai kas, laba, pemasukan, atau hal terkait keuangan lainnya?";
+      }
+
+      const aiNow = new Date();
+      const aiTimestamp = aiNow.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + " · " + aiNow.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+      const aiMsg = { id: (Date.now() + 1).toString(), timestamp: aiTimestamp, role: 'ai' as const, content: hasilJawaban };
+      
+      setAiChatHistory(prev => [...prev, aiMsg]);
+      setIsAiLoading(false);
+    }, 800); 
   };
 
   const addTxn = () => {
@@ -447,13 +537,14 @@ export default function App() {
                       <th style={{ padding: '12px 16px', color: '#A5A58D', fontWeight: 600, width: '35%' }}>Keterangan</th>
                       <th style={{ padding: '12px 16px', color: '#A5A58D', fontWeight: 600, textAlign: 'right' }}>Debet (Masuk)</th>
                       <th style={{ padding: '12px 16px', color: '#A5A58D', fontWeight: 600, textAlign: 'right' }}>Kredit (Keluar)</th>
+                      <th style={{ padding: '12px 16px', color: '#A5A58D', fontWeight: 600, textAlign: 'center', width: '60px' }}>Aksi</th>
                       {filterType === 'semua' && <th style={{ padding: '12px 16px', color: '#A5A58D', fontWeight: 600, textAlign: 'right' }}>Saldo</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {filteredTxns.length === 0 ? (
                       <tr>
-                        <td colSpan={filterType === 'semua' ? 5 : 4} style={{ padding: '30px', textAlign: 'center', color: '#A5A58D' }}>Tidak ada transaksi.</td>
+                        <td colSpan={filterType === 'semua' ? 6 : 5} style={{ padding: '30px', textAlign: 'center', color: '#A5A58D' }}>Tidak ada transaksi.</td>
                       </tr>
                     ) : (
                       filteredTxns.map((t, index) => (
@@ -468,6 +559,11 @@ export default function App() {
                           </td>
                           <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 500, color: '#B18B5E' }}>
                            {t.type === 'keluar' ? fmt(t.amount) : '-'}
+                          </td>
+                          <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                            <button onClick={() => setDeleteId(t.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B18B5E', padding: '4px 8px', borderRadius: '4px', fontSize: 16 }}>
+                              🗑️
+                            </button>
                           </td>
                           {filterType === 'semua' && (
                             <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, color: t.saldo >= 0 ? '#6B705C' : '#B18B5E' }}>
@@ -627,7 +723,119 @@ export default function App() {
             </div>
           </>
         )}
+        {/* ══════════════════════════════ AI ASISTEN ══════════════════════════════ */}
+        {tab === "asisten" && (
+          <div style={{ ...c.card, maxWidth: '600px', margin: '40px auto 0', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 160px)' }}>
+            <div>
+              <div style={{ ...c.sTitle, marginBottom: 4 }}>💬 AI Asisten: My Akuntansi</div>
+              <div style={{ fontSize: 13, color: '#A5A58D', marginBottom: 20 }}>Tanyakan informasi seputar kas, laba, pemasukan, atau pengeluaran Anda. Historis percakapan disimpan untuk referensi Anda.</div>
+            </div>
+            
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px', border: '1px solid #DCD9CC', background: '#efeae2', borderRadius: 12, marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {aiChatHistory.length === 0 ? (
+                <div style={{ margin: 'auto', background: 'rgba(255,255,255,0.7)', padding: '6px 12px', borderRadius: 12, color: '#554', fontSize: 13, textAlign: 'center' }}>
+                  Belum ada percakapan. Silakan mulai bertanya...
+                </div>
+              ) : (
+                aiChatHistory.map(msg => (
+                  <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 4 }}>
+                    <div style={{ 
+                      maxWidth: '85%', 
+                      padding: '8px 12px 24px 12px',
+                      position: 'relative',
+                      borderRadius: 8, 
+                      borderTopRightRadius: msg.role === 'user' ? 0 : 8,
+                      borderTopLeftRadius: msg.role === 'ai' ? 0 : 8,
+                      background: msg.role === 'user' ? '#d9fdd3' : '#ffffff', 
+                      color: '#111b21',
+                      fontSize: 14.5,
+                      lineHeight: 1.4,
+                      boxShadow: '0 1px 0.5px rgba(11,20,26,.13)',
+                      whiteSpace: 'pre-wrap'
+                    }}>
+                      <div style={{ marginBottom: 0 }}>{msg.content}</div>
+                      <div style={{ position: 'absolute', bottom: 4, right: 8, fontSize: 11, color: '#667781', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {msg.timestamp.split(' · ')[1] || msg.timestamp}
+                        {msg.role === 'user' && <span style={{ color: '#53bdeb' }}>✓✓</span>}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+              {isAiLoading && (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', marginBottom: 4 }}>
+                  <div style={{ 
+                    padding: '8px 16px', 
+                    borderRadius: 8, 
+                    borderTopLeftRadius: 0, 
+                    background: '#ffffff', 
+                    fontSize: 14,
+                    boxShadow: '0 1px 0.5px rgba(11,20,26,.13)'
+                  }}>
+                    <em style={{ color: '#8696a0' }}>Mengetik...</em>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <input 
+                type="text" 
+                value={aiPrompt}
+                onChange={e => setAiPrompt(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleAskAI()}
+                placeholder="Ketik pertanyaan di sini (cth: Berapa laba bulan ini?)" 
+                style={{ ...c.input, flex: 1, padding: "12px 14px", fontSize: 14 }}
+              />
+              <button 
+                onClick={handleAskAI}
+                disabled={isAiLoading || aiPrompt.trim() === ""}
+                style={{
+                  padding: '0 20px',
+                  borderRadius: 8,
+                  border: 'none',
+                  backgroundColor: isAiLoading || aiPrompt.trim() === "" ? '#C8C4B7' : '#367609',
+                  color: '#fff',
+                  fontWeight: 600,
+                  fontSize: 14,
+                  cursor: isAiLoading || aiPrompt.trim() === "" ? 'not-allowed' : 'pointer',
+                  transition: 'background-color 0.2s',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                }}
+              >
+                Tanya
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Modal Konfirmasi Hapus */}
+      {deleteId && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', padding: 24, borderRadius: 12, width: 320, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+            <h3 style={{ marginTop: 0, color: '#4A4A40', fontSize: 16 }}>Hapus Transaksi</h3>
+            <p style={{ color: '#A5A58D', fontSize: 13, lineHeight: 1.5 }}>Apakah Anda yakin ingin menghapus transaksi ini? Tindakan ini tidak dapat dibatalkan.</p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
+              <button 
+                onClick={() => setDeleteId(null)} 
+                style={{ padding: '8px 16px', border: '1px solid #DCD9CC', background: '#fff', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 500, color: '#4A4A40' }}>
+                Batal
+              </button>
+              <button 
+                onClick={() => {
+                  setTxns(prev => prev.filter(tx => tx.id !== deleteId));
+                  setDeleteId(null);
+                  setMsg({ ok: true, text: "Transaksi berhasil dihapus." });
+                  setTimeout(() => setMsg(null), 3000);
+                }} 
+                style={{ padding: '8px 16px', border: 'none', background: '#B18B5E', color: '#fff', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 500 }}>
+                Hapus
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

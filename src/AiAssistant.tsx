@@ -23,96 +23,23 @@ export function AiAssistant({ txns, setTxns, catsMasuk, catsKeluar, onExport }: 
     setLoading(true);
 
     try {
-      const apiKey = (import.meta as any).env.VITE_GEMINI_API_KEY;
-      if (!apiKey) {
-        setMessages(prev => [...prev, { role: 'assistant', text: "Error: API Key Gemini tidak ditemukan. Pastikan ada di file .env.local" }]);
-        setLoading(false);
-        return;
-      }
-
-      const ai = new GoogleGenAI({ apiKey });
-      
-      const simplifiedTxns = txns.map(t => ({
-        id: t.id,
-        date: t.date,
-        type: t.type,
-        cat: t.cat,
-        amount: t.amount,
-        desc: t.desc.substring(0, 30) 
-      }));
-      
-      const systemInstruction = `Kamu adalah asisten keuangan UMKM. 
-Daftar transaksi saat ini (JSON):
-${JSON.stringify(simplifiedTxns)}
-
-Kategori Masuk yang tersedia: ${catsMasuk.join(', ')}.
-Kategori Keluar yang tersedia: ${catsKeluar.join(', ')}.
-
-Waktu saat ini: ${new Date().toISOString().split('T')[0]}.
-
-Tugasmu:
-Berdasarkan permintaan pengguna, tentukan aksi apa yang harus dilakukan pada data transaksi atau sistem.
-Format output harus JSON yang valid dengan skema berikut:
-{
-  "reply": "Pesan balasan ramah dalam bahasa Indonesia",
-  "actions": [
-    {
-      "action": "add" atau "edit" atau "delete" atau "export",
-      "id": ID transaksi (wajib untuk edit/delete, abaikan untuk add/export),
-      "data": { // wajib untuk add/edit
-         "desc": "deskripsi",
-         "amount": nominal_angka,
-         "cat": "kategori",
-         "type": "masuk" atau "keluar",
-         "date": "YYYY-MM-DD"
-      }
-    }
-  ]
-}
-`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: userText,
-        config: {
-          systemInstruction,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-               reply: { type: Type.STRING, description: "Pesan balasan asisten" },
-               actions: {
-                 type: Type.ARRAY,
-                 items: {
-                   type: Type.OBJECT,
-                   properties: {
-                     action: { type: Type.STRING, description: "add, edit, delete, atau export" },
-                     id: { type: Type.NUMBER, description: "ID transaksi jika edit/delete" },
-                     data: {
-                        type: Type.OBJECT,
-                        properties: {
-                           desc: { type: Type.STRING },
-                           amount: { type: Type.NUMBER },
-                           cat: { type: Type.STRING },
-                           type: { type: Type.STRING },
-                           date: { type: Type.STRING }
-                        }
-                     }
-                   }
-                 }
-               }
-            }
-          }
-        }
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: userText,
+          txns: txns,
+          catsMasuk,
+          catsKeluar,
+          mode: 'floating_ai'
+        })
       });
 
-      const responseText = response.text || "";
-      let parsed = { reply: "Maaf, terjadi kesalahan.", actions: [] };
-      try {
-        parsed = JSON.parse(responseText);
-      } catch(e) {
-        console.error("Gagal parse JSON", responseText);
+      if (!response.ok) {
+        throw new Error("Gagal menghubungi server");
       }
+
+      const parsed = await response.json();
 
       setMessages(prev => [...prev, { role: 'assistant', text: parsed.reply }]);
 
@@ -125,16 +52,16 @@ Format output harus JSON yang valid dengan skema berikut:
               shouldExport = true;
             } else if (act.action === 'add' && act.data) {
               newTxns.push({
-                id: Date.now() + Math.floor(Math.random() * 1000),
+                id: crypto.randomUUID(),
                 ...act.data
               });
             } else if (act.action === 'edit' && act.id && act.data) {
-              const idx = newTxns.findIndex(t => t.id === act.id);
+              const idx = newTxns.findIndex(t => String(t.id) === String(act.id));
               if (idx !== -1) {
                 newTxns[idx] = { ...newTxns[idx], ...act.data };
               }
             } else if (act.action === 'delete' && act.id) {
-              newTxns = newTxns.filter(t => t.id !== act.id);
+              newTxns = newTxns.filter(t => String(t.id) !== String(act.id));
             }
           });
           return newTxns;
@@ -179,11 +106,14 @@ Format output harus JSON yang valid dengan skema berikut:
               </div>
             )}
             {messages.map((msg, i) => (
-              <div key={i} className={`self-${msg.role === 'user' ? 'end' : 'start'} bg-[${msg.role === 'user' ? '#6B705C' : '#E8E6DB'}] text-[${msg.role === 'user' ? 'white' : '#4A4A40'}] px-3 py-2 rounded-xl text-[12px] md:text-[13px] leading-relaxed max-w-[85%] ${msg.role === 'user' ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
-                style={{
-                  backgroundColor: msg.role === 'user' ? '#6B705C' : '#E8E6DB',
-                  color: msg.role === 'user' ? 'white' : '#4A4A40',
-                }}
+              <div 
+                key={i} 
+                className={`px-3 py-2 rounded-xl text-[12px] md:text-[13px] leading-relaxed max-w-[85%] ${
+                  msg.role === 'user' 
+                    ? 'self-end bg-[#6B705C] text-white rounded-br-sm' 
+                    : 'self-start bg-[#E8E6DB] text-[#4A4A40] rounded-bl-sm'
+                }`}
+                style={{ whiteSpace: "pre-wrap" }}
               >
                 {msg.text}
               </div>

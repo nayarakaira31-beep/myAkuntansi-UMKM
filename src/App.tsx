@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { AiAssistant } from "./AiAssistant";
+import { motion, AnimatePresence } from "motion/react";
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -13,12 +14,22 @@ const fmtS = (n: number) => {
   return `Rp ${n}`;
 };
 
+export interface Transaction {
+  id: string | number;
+  date: string;
+  desc: string;
+  cat: string;
+  type: "masuk" | "keluar";
+  amount: number;
+  saldo?: number;
+}
+
 const CAT_MASUK = ["Penjualan Produk", "Jasa / Layanan", "Investasi Masuk", "Pinjaman", "Pendapatan Lain"];
 const CAT_KELUAR = ["Bahan Baku", "Gaji Karyawan", "Operasional", "Marketing & Iklan", "Utilitas", "Pajak & Admin", "Pengeluaran Lain"];
 
 const PIE_COLORS = ["#6B705C", "#8A8F78", "#A5A58D", "#B18B5E", "#C5A582", "#A08C75", "#7A6A55", "#4A4A40"];
 
-const INIT_TXNS = [
+const INIT_TXNS: Transaction[] = [
   { id:1, date:"2026-05-01", desc:"Penjualan produk batch pertama", cat:"Penjualan Produk", type:"masuk", amount:2500000 },
   { id:2, date:"2026-05-02", desc:"Pembelian bahan baku mingguan", cat:"Bahan Baku", type:"keluar", amount:750000 },
   { id:3, date:"2026-05-03", desc:"Gaji karyawan bulan Mei", cat:"Gaji Karyawan", type:"keluar", amount:1500000 },
@@ -38,29 +49,41 @@ const TABS = [
 ];
 
 export default function App() {
+  const [showSplash, setShowSplash] = useState(true);
   const [tab, setTab] = useState("dashboard");
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
-    return localStorage.getItem("myAkuntansi_isLoggedIn") === "true";
+    try {
+      return localStorage.getItem("myAkuntansi_isLoggedIn") === "true";
+    } catch {
+      return false;
+    }
   });
   
   useEffect(() => {
-    localStorage.setItem("myAkuntansi_isLoggedIn", String(isLoggedIn));
+    const timer = setTimeout(() => setShowSplash(false), 2000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("myAkuntansi_isLoggedIn", String(isLoggedIn));
+    } catch {}
   }, [isLoggedIn]);
 
-  const [txns, setTxns] = useState(() => {
-    const saved = localStorage.getItem("myAkuntansi_txns");
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error("Gagal membaca data dari storage");
-      }
+  const [txns, setTxns] = useState<Transaction[]>(() => {
+    try {
+      const saved = localStorage.getItem("myAkuntansi_txns");
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error("Gagal membaca data dari storage", e);
     }
     return INIT_TXNS;
   });
 
   useEffect(() => {
-    localStorage.setItem("myAkuntansi_txns", JSON.stringify(txns));
+    try {
+      localStorage.setItem("myAkuntansi_txns", JSON.stringify(txns));
+    } catch {}
   }, [txns]);
 
   const [form, setForm] = useState({
@@ -70,9 +93,18 @@ export default function App() {
   const [filterMonth, setFilterMonth] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean, text: string } | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
-const [editId, setEditId] = useState<number | null>(null);
-// Fungsi untuk memulai edit
-  const startEdit = (t: any) => {
+  const [editId, setEditId] = useState<number | null>(null);
+  
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 15;
+  
+  // Reset page when filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterMonth, filterType]);
+
+  // Fungsi untuk memulai edit
+  const startEdit = (t: Transaction) => {
     setForm({
       date: t.date,
       desc: t.desc,
@@ -135,13 +167,37 @@ const [editId, setEditId] = useState<number | null>(null);
     return finalList.reverse();
   }, [txns, filterMonth, filterType]);
 
-  const totalMasuk  = useMemo(() => globalFilteredTxns.filter(t => t.type === "masuk").reduce((s, t) => s + t.amount, 0), [globalFilteredTxns]);
-  const totalKeluar = useMemo(() => globalFilteredTxns.filter(t => t.type === "keluar").reduce((s, t) => s + t.amount, 0), [globalFilteredTxns]);
-  const laba        = totalMasuk - totalKeluar;
-  const margin      = totalMasuk > 0 ? ((laba / totalMasuk) * 100).toFixed(1) : "0";
+  const { saldoAwal, totalMasuk, totalKeluar, saldoAkhir } = useMemo(() => {
+    let _saldoAwal = 0;
+    let _masuk = 0;
+    let _keluar = 0;
+
+    txns.forEach(t => {
+      // Is transaction before our filtered month?
+      if (filterMonth && t.date < filterMonth + '-01') {
+        if (t.type === 'masuk') _saldoAwal += t.amount;
+        else _saldoAwal -= t.amount;
+      } 
+      // Is transaction IN our filtered month (or no filter)?
+      else if (!filterMonth || t.date.startsWith(filterMonth)) {
+        if (t.type === 'masuk') _masuk += t.amount;
+        else _keluar += t.amount;
+      }
+    });
+
+    return { 
+      saldoAwal: _saldoAwal, 
+      totalMasuk: _masuk, 
+      totalKeluar: _keluar, 
+      saldoAkhir: _saldoAwal + _masuk - _keluar 
+    };
+  }, [txns, filterMonth]);
+  
+  const laba = totalMasuk - totalKeluar;
+  const margin = totalMasuk > 0 ? ((laba / totalMasuk) * 100).toFixed(1) : "0";
 
   const dailyData = useMemo(() => {
-    const map: Record<string, any> = {};
+    const map: Record<string, { date: string; dateFull: string; masuk: number; keluar: number }> = {};
     globalFilteredTxns.forEach(t => {
       if (!map[t.date]) map[t.date] = { date: t.date.slice(8), dateFull: t.date, masuk: 0, keluar: 0 };
       if (t.type === "masuk") map[t.date].masuk += t.amount;
@@ -183,7 +239,7 @@ const [editId, setEditId] = useState<number | null>(null);
     document.body.removeChild(link);
   };
 
-  const handleAskAI = () => {
+  const handleAskAI = async () => {
     if (aiPrompt.trim() === "") return;
     
     setIsAiLoading(true);
@@ -191,78 +247,48 @@ const [editId, setEditId] = useState<number | null>(null);
     const timestamp = now.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + " · " + now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
     
     const promptText = aiPrompt;
-    const userMsg = { id: Date.now().toString(), timestamp, role: 'user' as const, content: promptText };
+    const userMsg = { id: crypto.randomUUID(), timestamp, role: 'user' as const, content: promptText };
     setAiChatHistory(prev => [...prev, userMsg]);
     setAiPrompt("");
 
-    setTimeout(() => {
-      let teksKecil = promptText.toLowerCase();
-      let hasilJawaban = "";
-      
-      const detectTopic = (text: string) => {
-        if (text.includes("evaluasi") || text.includes("analisis") || text.includes("insight") || text.includes("saran") || text.includes("keputusan")) return "evaluasi";
-        if (text.includes("kas") || text.includes("uang") || text.includes("saldo")) return "kas";
-        if (text.includes("laba") || text.includes("rugi") || text.includes("keuntungan")) return "laba";
-        if (text.includes("piutang") || text.includes("tagihan") || text.includes("belum") || text.includes("bayar")) return "piutang";
-        if (text.includes("pengeluaran") || text.includes("beban") || text.includes("biaya") || text.includes("keluar") || text.includes("habis")) return "pengeluaran";
-        if (text.includes("pemasukan") || text.includes("pendapatan") || text.includes("masuk") || text.includes("terima")) return "pemasukan";
-        if (text.includes("transaksi")) return "transaksi";
-        return null;
-      };
+    try {
+      const summaryTxns = globalFilteredTxns.map(t => ({
+        date: t.date,
+        type: t.type,
+        amount: t.amount,
+        cat: t.cat
+      }));
 
-      let activeTopic = detectTopic(teksKecil);
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: promptText,
+          txns: summaryTxns,
+          mode: 'asisten_tab'
+        })
+      });
 
-      if (!activeTopic && aiChatHistory.length > 0) {
-        for (let i = aiChatHistory.length - 1; i >= 0; i--) {
-          const pastTopic = detectTopic(aiChatHistory[i].content.toLowerCase());
-          if (pastTopic) {
-             const isContinuation = teksKecil.includes("lalu") || teksKecil.includes("bagaimana") || teksKecil.includes("kalau") || teksKecil.includes("jelaskan") || teksKecil.includes("detail") || teksKecil.includes("terus") || teksKecil.includes("bulan ini") || teksKecil.includes("hari ini");
-             if (isContinuation || teksKecil.length < 20) {
-               activeTopic = pastTopic;
-             }
-             break;
-          }
-        }
-      }
-      
-      if (activeTopic === "evaluasi") {
-          let advice = "";
-          let marginNum = (totalMasuk > 0 ? ((laba / totalMasuk) * 100) : 0);
-          if (laba > 0) {
-              if (marginNum >= 20) {
-                  advice = `Kondisi keuangan saat ini sangat sehat (margin keuntungan ${marginNum.toFixed(1)}%). Pertahankan efisiensi ini. Sebagai keputusan strategis, alokasikan sebagian laba ke dana cadangan atau investasi ekspansi usaha.`;
-              } else {
-                  advice = `Arus kas positif terbentuk, namun margin keuntungan di angka ${marginNum.toFixed(1)}%. Disarankan untuk mengevaluasi pos pengeluaran operasional yang masih bisa ditekan agar profitabilitas makin maksimal.`;
-              }
-          } else if (laba === 0) {
-              advice = `Keuangan Anda saat ini impas (Break Even). Sangat butuh fokus pada strategi pemasaran di periode mendatang dan evaluasi ulang target produk untuk bisa mencetak laba.`;
-          } else {
-              advice = `Perhatian besar, usaha mencatatkan kerugian / kas bersih negatif sebesar ${fmt(Math.abs(laba))}. Evaluasi mendesak: segera hentikan pengeluaran yang tidak esensial, negosiasi ulang hutang/piutang jika ada, dan temukan cara menggenjot penjualan.`;
-          }
-          hasilJawaban = `📊 Evaluasi & Keputusan Keuangan:\nBulan ini total pemasukan Anda ${fmt(totalMasuk)} dan pengeluaran ${fmt(totalKeluar)}.\n\nInsight: ${advice}`;
-      } else if (activeTopic === "kas") {
-          hasilJawaban = `Berdasarkan konteks pembicaraan kita mengenai Saldo Kas, total kas saat ini adalah ${fmt(laba)}. Angka ini didapat dari seluruh catatan transaksi di sistem.`;
-      } else if (activeTopic === "laba") {
-          hasilJawaban = `Terkait Laba/Rugi, laba bersih tercatat sebesar ${fmt(laba)}, ini dihitung dari kumulatif pendapatan dikurangi pengeluaran.`;
-      } else if (activeTopic === "piutang") {
-          hasilJawaban = `Untuk Tagihan/Piutang, terdapat nilai tagihan sebesar Rp 3.200.000 yang akan jatuh tempo minggu depan. (Data contoh)`;
-      } else if (activeTopic === "pengeluaran") {
-          hasilJawaban = `Membahas tentang Pengeluaran dan Biaya, total pencatatan saat ini sebesar ${fmt(totalKeluar)}. Pastikan Anda merencanakan efisiensi pengeluaran.`;
-      } else if (activeTopic === "pemasukan") {
-          hasilJawaban = `Membahas Pemasukan Anda, total pendapatan saat ini tercatat sebesar ${fmt(totalMasuk)}. Terus tingkatkan performa penjualan!`;
-      } else if (activeTopic === "transaksi") {
-          hasilJawaban = `Sistem mencatat sebanyak ${globalFilteredTxns.length} riwayat transaksi sejauh ini.`;
-      } else {
-          hasilJawaban = "Maaf, dari konteks pembicaraan kita, saya kurang memahami maksud spesifik Anda. Boleh diperjelas mengenai kas, laba, pemasukan, atau hal terkait keuangan lainnya?";
+      if (!response.ok) {
+        throw new Error("Gagal menghubungi AI");
       }
 
+      const parsed = await response.json();
+      
       const aiNow = new Date();
       const aiTimestamp = aiNow.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + " · " + aiNow.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-      const aiMsg = { id: (Date.now() + 1).toString(), timestamp: aiTimestamp, role: 'ai' as const, content: hasilJawaban };
+      const aiMsg = { id: crypto.randomUUID(), timestamp: aiTimestamp, role: 'ai' as const, content: parsed.reply };
       
       setAiChatHistory(prev => [...prev, aiMsg]);
+    } catch (e: unknown) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      const aiNow = new Date();
+      const aiTimestamp = aiNow.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + " · " + aiNow.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+      const aiMsg = { id: crypto.randomUUID(), timestamp: aiTimestamp, role: 'ai' as const, content: "Maaf, terjadi kesalahan atau AI sedang tidak bisa diakses: " + errorMsg };
+      setAiChatHistory(prev => [...prev, aiMsg]);
+    } finally {
       setIsAiLoading(false);
-    }, 800); 
+    }
   };
 
   const addTxn = () => {
@@ -314,7 +340,7 @@ const [editId, setEditId] = useState<number | null>(null);
     if (editId) {
       // Jika mode edit, perbarui data yang ada
       setTxns(prev => prev.map(t => 
-        t.id === editId 
+        String(t.id) === String(editId) 
           ? { ...t, date: form.date, desc: form.desc, cat: form.cat, type: form.type, amount: amt } 
           : t
       ));
@@ -322,7 +348,7 @@ const [editId, setEditId] = useState<number | null>(null);
       setEditId(null); // Keluar dari mode edit
     } else {
       // Jika bukan edit, buat data baru
-      setTxns(prev => [...prev, { id: Date.now(), date: form.date, desc: form.desc, cat: form.cat, type: form.type, amount: amt }]);
+      setTxns(prev => [...prev, { id: crypto.randomUUID(), date: form.date, desc: form.desc, cat: form.cat, type: form.type, amount: amt }]);
       setMsg({ ok: true, text: "Transaksi berhasil disimpan!" });
     }
 
@@ -330,14 +356,54 @@ const [editId, setEditId] = useState<number | null>(null);
     setTimeout(() => setMsg(null), 3000);
   };
 
+  if (showSplash) {
+    return (
+      <AnimatePresence>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="font-sans min-h-screen bg-[#FAF9F6] flex flex-col items-center justify-center p-4"
+        >
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.5, ease: "easeOut" }}
+            className="w-20 h-20 bg-[#007a07] rounded-3xl flex items-center justify-center text-white text-4xl mb-6 shadow-xl shadow-[#007a07]/30"
+          >
+            📊
+          </motion.div>
+          
+          <motion.h1 
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ duration: 0.5, delay: 0.2, ease: "easeOut" }}
+            className="text-3xl md:text-4xl font-bold text-[#4A4A40] mb-2 tracking-tight"
+          >
+            myAkuntansi
+          </motion.h1>
+          
+          <motion.p
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ duration: 0.5, delay: 0.4, ease: "easeOut" }}
+            className="text-[14px] text-[#A5A58D] tracking-wide"
+          >
+            MENGANALISIS KEUANGAN..
+          </motion.p>
+        </motion.div>
+      </AnimatePresence>
+    );
+  }
+
   const cats = form.type === "masuk" ? CAT_MASUK : CAT_KELUAR;
 
-  const CustomTip = ({ active, payload, label }: any) => {
+  const CustomTip = ({ active, payload, label }: { active?: boolean, payload?: any[], label?: string }) => {
     if (!active || !payload?.length) return null;
     return (
       <div className="bg-white border border-[#DCD9CC] rounded-[8px] px-3.5 py-2.5 text-xs shadow-sm">
         <p className="m-0 mb-1.5 font-medium text-[#4A4A40]">{label}</p>
-        {payload.map((p: any, i: number) => (
+        {payload.map((p: { color: string; name: string; value: number }, i: number) => (
           <p key={i} className="m-0 my-0.5" style={{ color: p.color }}>{p.name}: {fmtS(p.value)}</p>
         ))}
       </div>
@@ -639,7 +705,7 @@ const [editId, setEditId] = useState<number | null>(null);
               {/* Mini summary */}
               <div className="mt-5 pt-4 border-t border-dashed border-white/30">
                 <div className="text-[11px] text-white mb-1 tracking-[0.3px] uppercase opacity-90">Saldo Saat Ini</div>
-                <div className={`text-xl md:text-2xl font-bold tracking-[-0.5px] ${laba >= 0 ? "text-white" : "text-[#ffb0b0]"}`}>{fmtS(laba)}</div>
+                <div className={`text-xl md:text-2xl font-bold tracking-[-0.5px] ${saldoAkhir >= 0 ? "text-white" : "text-[#ffb0b0]"}`}>{fmtS(saldoAkhir)}</div>
                 <div className="flex justify-between mt-3 bg-white/10 p-3 rounded-lg">
                   <div>
                     <div className="text-[10px] text-white/70 uppercase mb-0.5">Total Masuk</div>
@@ -690,7 +756,7 @@ const [editId, setEditId] = useState<number | null>(null);
                         <td colSpan={filterType === 'semua' ? 6 : 5} className="py-8 text-center text-[#A5A58D]">Tidak ada transaksi.</td>
                       </tr>
                     ) : (
-                      filteredTxns.map((t, index) => (
+                      filteredTxns.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((t, index) => (
                         <tr key={t.id} className={`border-b border-[#E8E6DB] ${index % 2 === 0 ? 'bg-white' : 'bg-[#FAF9F6]'} hover:bg-gray-50`}>
                           <td className="py-3 px-3 md:px-4 text-[#4A4A40]">{new Date(t.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
                           <td className="py-3 px-3 md:px-4">
@@ -707,13 +773,13 @@ const [editId, setEditId] = useState<number | null>(null);
                             <button onClick={() => startEdit(t)} className="bg-transparent border-none cursor-pointer text-[#6B705C] px-1 md:px-2 py-1 rounded hover:bg-black/5 text-[14px] md:text-[16px]">
                               ✏️
                             </button>
-                            <button onClick={() => setDeleteId(t.id)} className="bg-transparent border-none cursor-pointer text-[#B18B5E] px-1 md:px-2 py-1 rounded hover:bg-black/5 text-[14px] md:text-[16px]">
+                            <button onClick={() => setDeleteId(t.id as number)} className="bg-transparent border-none cursor-pointer text-[#B18B5E] px-1 md:px-2 py-1 rounded hover:bg-black/5 text-[14px] md:text-[16px]">
                               🗑️
                             </button>
                           </td>
                           {filterType === 'semua' && (
-                            <td className={`py-3 px-3 md:px-4 text-right font-semibold ${(t as any).saldo >= 0 ? 'text-[#6B705C]' : 'text-[#B18B5E]'}`}>
-                              {fmt((t as any).saldo)}
+                            <td className={`py-3 px-3 md:px-4 text-right font-semibold ${t.saldo !== undefined && t.saldo >= 0 ? 'text-[#6B705C]' : 'text-[#B18B5E]'}`}>
+                              {fmt(t.saldo || 0)}
                             </td>
                           )}
                         </tr>
@@ -722,6 +788,31 @@ const [editId, setEditId] = useState<number | null>(null);
                   </tbody>
                 </table>
               </div>
+              
+              {/* Pagination Controls */}
+              {Math.ceil(filteredTxns.length / itemsPerPage) > 1 && (
+                <div className="flex items-center justify-between mt-4 pt-4 border-t border-[#DCD9CC]">
+                  <div className="text-[12px] md:text-[13px] text-[#A5A58D]">
+                    Menampilkan {(currentPage - 1) * itemsPerPage + 1} - {Math.min(currentPage * itemsPerPage, filteredTxns.length)} dari {filteredTxns.length}
+                  </div>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                      className="px-3 py-1.5 border border-[#DCD9CC] bg-white rounded-lg text-[12px] font-medium text-[#4A4A40] hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Sebelumnya
+                    </button>
+                    <button 
+                      onClick={() => setCurrentPage(p => Math.min(Math.ceil(filteredTxns.length / itemsPerPage), p + 1))}
+                      disabled={currentPage === Math.ceil(filteredTxns.length / itemsPerPage)}
+                      className="px-3 py-1.5 border border-[#DCD9CC] bg-white rounded-lg text-[12px] font-medium text-[#4A4A40] hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Selanjutnya
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { AiAssistant } from "./AiAssistant";
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
@@ -39,15 +39,57 @@ const TABS = [
 
 export default function App() {
   const [tab, setTab] = useState("dashboard");
-  const [txns, setTxns] = useState(INIT_TXNS);
+  const [isLoggedIn, setIsLoggedIn] = useState(() => {
+    return localStorage.getItem("myAkuntansi_isLoggedIn") === "true";
+  });
+  
+  useEffect(() => {
+    localStorage.setItem("myAkuntansi_isLoggedIn", String(isLoggedIn));
+  }, [isLoggedIn]);
+
+  const [txns, setTxns] = useState(() => {
+    const saved = localStorage.getItem("myAkuntansi_txns");
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error("Gagal membaca data dari storage");
+      }
+    }
+    return INIT_TXNS;
+  });
+
+  useEffect(() => {
+    localStorage.setItem("myAkuntansi_txns", JSON.stringify(txns));
+  }, [txns]);
+
   const [form, setForm] = useState({
-    date: "2026-05-09", desc: "", cat: "", type: "masuk", amount: ""
+    date: new Date().toISOString().slice(0, 10), desc: "", cat: "", type: "masuk", amount: ""
   });
   const [filterType, setFilterType] = useState("semua");
   const [filterMonth, setFilterMonth] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean, text: string } | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+const [editId, setEditId] = useState<number | null>(null);
+// Fungsi untuk memulai edit
+  const startEdit = (t: any) => {
+    setForm({
+      date: t.date,
+      desc: t.desc,
+      cat: t.cat,
+      type: t.type,
+      // Format angka dengan titik agar rapi di form
+      amount: t.amount.toLocaleString('id-ID') 
+    });
+    setEditId(t.id);
+    setTab("transaksi"); // Pastikan tetap di tab transaksi
+  };
 
+  // Fungsi untuk membatalkan edit
+  const cancelEdit = () => {
+    setEditId(null);
+    setForm({ date: new Date().toISOString().split("T")[0], desc: "", cat: "", type: "masuk", amount: "" });
+  };
   // States for AI Prompt feature
   const [aiPrompt, setAiPrompt] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
@@ -65,6 +107,33 @@ export default function App() {
     }
     return list;
   }, [txns, filterMonth]);
+
+  const filteredTxns = useMemo(() => {
+    // 1. Urutkan SEMUA transaksi dari awal mula (kronologis)
+    const sortedAllAsc = [...txns].sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+
+    // 2. Hitung running balance untuk seluruh sejarah transaksi
+    let currentBalance = 0;
+    const allWithBalance = sortedAllAsc.map(t => {
+      if (t.type === 'masuk') currentBalance += t.amount;
+      else currentBalance -= t.amount;
+      return { ...t, saldo: currentBalance };
+    });
+
+    // 3. BARU LAKUKAN FILTERING sesuai pilihan user di UI
+    let finalList = allWithBalance;
+    if (filterMonth) {
+      finalList = finalList.filter(t => t.date.startsWith(filterMonth));
+    }
+    if (filterType !== "semua") {
+      finalList = finalList.filter(t => t.type === filterType);
+    }
+    
+    // 4. Return secara descending agar transaksi terbaru ada di paling atas
+    return finalList.reverse();
+  }, [txns, filterMonth, filterType]);
 
   const totalMasuk  = useMemo(() => globalFilteredTxns.filter(t => t.type === "masuk").reduce((s, t) => s + t.amount, 0), [globalFilteredTxns]);
   const totalKeluar = useMemo(() => globalFilteredTxns.filter(t => t.type === "keluar").reduce((s, t) => s + t.amount, 0), [globalFilteredTxns]);
@@ -92,22 +161,6 @@ export default function App() {
     globalFilteredTxns.filter(t => t.type === "masuk").forEach(t => { map[t.cat] = (map[t.cat] || 0) + t.amount; });
     return Object.entries(map).map(([name, value]) => ({ name, value }));
   }, [globalFilteredTxns]);
-
-  const filteredTxns = useMemo(() => {
-    let list = filterType === "semua" ? globalFilteredTxns : globalFilteredTxns.filter(t => t.type === filterType);
-    
-    // Calculate running balance
-    const sortedAsc = [...list].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    let currentBalance = 0;
-    const withBalance = sortedAsc.map(t => {
-      if (t.type === 'masuk') currentBalance += t.amount;
-      else currentBalance -= t.amount;
-      return { ...t, saldo: currentBalance };
-    });
-    
-    // Return descending
-    return withBalance.reverse();
-  }, [globalFilteredTxns, filterType]);
 
   const exportCSV = () => {
     if (filteredTxns.length === 0) {
@@ -159,13 +212,12 @@ export default function App() {
 
       let activeTopic = detectTopic(teksKecil);
 
-      // Konteks memori percakapan: inferensi dari percakapan sebelumnya jika pertanyaan saat ini ambigu
       if (!activeTopic && aiChatHistory.length > 0) {
         for (let i = aiChatHistory.length - 1; i >= 0; i--) {
           const pastTopic = detectTopic(aiChatHistory[i].content.toLowerCase());
           if (pastTopic) {
              const isContinuation = teksKecil.includes("lalu") || teksKecil.includes("bagaimana") || teksKecil.includes("kalau") || teksKecil.includes("jelaskan") || teksKecil.includes("detail") || teksKecil.includes("terus") || teksKecil.includes("bulan ini") || teksKecil.includes("hari ini");
-             if (isContinuation || teksKecil.length < 20) { // Assume short prompts without keywords are continuations
+             if (isContinuation || teksKecil.length < 20) {
                activeTopic = pastTopic;
              }
              break;
@@ -259,9 +311,22 @@ export default function App() {
       return;
     }
 
-    setTxns(prev => [...prev, { id: Date.now(), date: form.date, desc: form.desc, cat: form.cat, type: form.type, amount: amt }]);
+    if (editId) {
+      // Jika mode edit, perbarui data yang ada
+      setTxns(prev => prev.map(t => 
+        t.id === editId 
+          ? { ...t, date: form.date, desc: form.desc, cat: form.cat, type: form.type, amount: amt } 
+          : t
+      ));
+      setMsg({ ok: true, text: "Transaksi berhasil diperbarui!" });
+      setEditId(null); // Keluar dari mode edit
+    } else {
+      // Jika bukan edit, buat data baru
+      setTxns(prev => [...prev, { id: Date.now(), date: form.date, desc: form.desc, cat: form.cat, type: form.type, amount: amt }]);
+      setMsg({ ok: true, text: "Transaksi berhasil disimpan!" });
+    }
+
     setForm({ date: new Date().toISOString().split("T")[0], desc: "", cat: "", type: "masuk", amount: "" });
-    setMsg({ ok: true, text: "Transaksi berhasil disimpan!" });
     setTimeout(() => setMsg(null), 3000);
   };
 
@@ -270,129 +335,183 @@ export default function App() {
   const CustomTip = ({ active, payload, label }: any) => {
     if (!active || !payload?.length) return null;
     return (
-      <div style={{ background: "#ffffff", border: "0.5px solid #DCD9CC", borderRadius: 8, padding: "10px 14px", fontSize: 12 }}>
-        <p style={{ margin: "0 0 6px 0", fontWeight: 500 }}>{label}</p>
+      <div className="bg-white border border-[#DCD9CC] rounded-[8px] px-3.5 py-2.5 text-xs shadow-sm">
+        <p className="m-0 mb-1.5 font-medium text-[#4A4A40]">{label}</p>
         {payload.map((p: any, i: number) => (
-          <p key={i} style={{ margin: "2px 0", color: p.color }}>{p.name}: {fmtS(p.value)}</p>
+          <p key={i} className="m-0 my-0.5" style={{ color: p.color }}>{p.name}: {fmtS(p.value)}</p>
         ))}
       </div>
     );
   };
 
-  const c = {
-    wrap: { fontFamily: "system-ui, -apple-system, sans-serif", color: "#4A4A40", minHeight: 640, background: "#FAF9F6" },
-    header: { background: "#007a07", borderBottom: "1px solid #DCD9CC", padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" },
-    nav: { display: "flex", background: "#ad9e6d", borderBottom: "0.5px solid #DCD9CC" },
-    navBtn: (a: boolean) => ({ padding: "11px 18px", fontSize: 13, border: "none", background: "none", cursor: "pointer", fontWeight: a ? 600 : 400, color: "#ffffff", borderBottom: a ? "2px solid #ffffff" : "2px solid transparent" }),
-    body: { padding: "18px 20px" },
-    card: { background: "#ffffff", border: "0.5px solid #DCD9CC", borderRadius: 24, padding: "24px", boxShadow: "0 1px 2px 0 rgba(0, 0, 0, 0.05)" },
-    metric: { background: "#dad2c6", color: "#6b705c", borderRadius: 24, padding: "14px 16px", border: "1px solid #DCD9CC" },
-    lbl: { fontSize: 11, color: "#A5A58D", marginBottom: 4, letterSpacing: 0.3, textTransform: "uppercase" as any },
-    num: (color?: string) => ({ fontSize: 20, fontWeight: 600, color: color || "#4A4A40", letterSpacing: "-0.5px" }),
-    sTitle: { fontSize: 16, fontWeight: 600, marginBottom: 12, color: "#4A4A40" },
-    input: { width: "100%", padding: "9px 11px", borderRadius: 8, border: "0.5px solid #DCD9CC", background: "#ffffff", color: "#4A4A40", fontSize: 13, boxSizing: "border-box" as any },
-    pill: (t: string) => ({ padding: "2px 9px", borderRadius: 20, fontSize: 11, fontWeight: 500, background: t === "masuk" ? "#E8E6DB" : "#F0EEE4", color: t === "masuk" ? "#6B705C" : "#B18B5E" }),
-  };
+  if (!isLoggedIn) {
+    return (
+      <div className="font-sans text-[#4A4A40] min-h-screen bg-[#FAF9F6] flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-sm mb-6 text-center">
+          <div className="w-16 h-16 bg-[#007a07] rounded-2xl flex items-center justify-center text-white text-3xl mx-auto mb-5 shadow-lg shadow-[#007a07]/20">
+            📊
+          </div>
+          <h1 className="text-2xl md:text-3xl font-bold text-[#4A4A40] mb-2 tracking-tight">myAkuntansi</h1>
+          <p className="text-[13px] md:text-sm text-[#A5A58D] max-w-[280px] mx-auto leading-relaxed">
+            Sistem pencatatan keuangan modern untuk UMKM yang praktis dan efisien.
+          </p>
+        </div>
+
+        <div className="bg-white border border-[#DCD9CC] rounded-[24px] w-full max-w-sm p-6 md:p-8 shadow-sm text-center relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#007a07] to-[#B18B5E]"></div>
+          
+          <h2 className="text-lg font-semibold text-[#4A4A40] mb-6">Masuk ke Akun Anda</h2>
+          
+          <div className="flex flex-col gap-3">
+            <button 
+              onClick={() => setIsLoggedIn(true)}
+              className="w-full bg-white border border-[#DCD9CC] text-[#4A4A40] font-medium py-3 md:py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm group"
+            >
+              <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform"/>
+              <span className="text-[13px] md:text-sm">Lanjutkan dengan Google (Individu)</span>
+            </button>
+
+            <button 
+              onClick={() => setIsLoggedIn(true)}
+              className="w-full bg-white border border-[#DCD9CC] text-[#4A4A40] font-medium py-3 md:py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm group"
+            >
+              <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform grayscale opacity-80 group-hover:grayscale-0 group-hover:opacity-100"/>
+              <span className="text-[13px] md:text-sm">Lanjutkan dengan Google Workspace</span>
+            </button>
+          </div>
+
+          <div className="mt-8 text-[11px] md:text-[12px] text-[#A5A58D]">
+            Dengan melanjutkan, Anda menyetujui <br/>
+            <a href="#" className="text-[#6B705C] hover:underline">Syarat Ketentuan</a> dan <a href="#" className="text-[#6B705C] hover:underline">Kebijakan Privasi</a> kami.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div style={c.wrap}>
+    <div className="font-sans text-[#4A4A40] min-h-screen bg-[#FAF9F6] flex flex-col">
       <AiAssistant txns={txns} setTxns={setTxns} catsMasuk={CAT_MASUK} catsKeluar={CAT_KELUAR} onExport={exportCSV} />
       {/* ── Header ─────────────────────────────── */}
-      <div style={c.header}>
+      <div className="bg-[#007a07] border-b border-[#DCD9CC] px-4 py-3 md:px-5 md:py-3.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-0 sticky top-0 z-20">
         <div>
-          <div style={{ color: "#ffffff", fontWeight: 700, fontSize: 16, letterSpacing: "-0.3px" }}>myAkuntansi UMKM</div>
-          <div style={{ color: "#ffffff", fontSize: 11, marginTop: 2 }}>Sistem Akuntansi & Keuangan Usaha Kecil</div>
+          <div className="text-white font-bold text-base tracking-[-0.3px]">myAkuntansi UMKM</div>
+          <div className="text-white text-[11px] mt-0.5 opacity-90">Sistem Akuntansi & Keuangan Usaha Kecil</div>
         </div>
-        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-          <select
-            value={filterMonth}
-            onChange={(e) => setFilterMonth(e.target.value)}
-            style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.1)", color: "#ffffff", fontSize: 13, cursor: "pointer", outline: "none", appearance: "none" }}
-          >
-            <option value="" style={{ color: '#000' }}>Semua Bulan</option>
-            {availableMonths.map(m => (
-              <option key={m} value={m} style={{ color: '#000' }}>{new Date(m + "-01").toLocaleDateString('id-ID', { year: 'numeric', month: 'short' })}</option>
-            ))}
-          </select>
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#ffffff", boxShadow: "0 0 0 2px rgba(255,255,255,0.3)" }}></div>
-            <span style={{ fontSize: 11, color: "#ffffff", fontWeight: 500, opacity: 0.9 }}>Live · {globalFilteredTxns.length} txns</span>
+        <div className="flex w-full md:w-auto gap-3 md:gap-4 items-center justify-between md:justify-end">
+          <div className="flex items-center gap-2">
+            <input
+              type="month"
+              value={filterMonth}
+              onChange={(e) => setFilterMonth(e.target.value)}
+              className="px-3 py-1.5 rounded-lg border border-white/30 bg-white/10 text-white text-[13px] cursor-pointer outline-none [color-scheme:dark]"
+            />
+            {filterMonth ? (
+              <button 
+                onClick={() => setFilterMonth("")}
+                className="text-white hover:text-white px-2.5 py-1.5 text-[12px] bg-white/10 hover:bg-white/20 rounded-lg transition-colors border border-white/20"
+                title="Tampilkan Semua Periode"
+              >
+                ✕ Semua
+              </button>
+            ) : (
+              <span className="text-white/80 text-[12px] px-2 hidden sm:inline-block">Semua Periode</span>
+            )}
+          </div>
+          <div className="flex gap-4 items-center shrink-0">
+            <div className="flex gap-2 items-center">
+              <div className="w-2 h-2 rounded-full bg-white shadow-[0_0_0_2px_rgba(255,255,255,0.3)]"></div>
+              <span className="text-[11px] text-white font-medium opacity-90">Live</span>
+            </div>
+            <button 
+              onClick={() => setIsLoggedIn(false)}
+              className="text-white/80 hover:text-white bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors border border-white/20"
+            >
+              Keluar
+            </button>
           </div>
         </div>
       </div>
 
       {/* ── Nav ─────────────────────────────── */}
-      <div style={c.nav}>
+      <div className="flex overflow-x-auto bg-[#ad9e6d] border-b-[0.5px] border-[#DCD9CC] sticky top-[72px] md:top-[60px] z-10 no-scrollbar">
         {TABS.map(t => (
-          <button key={t.id} style={c.navBtn(tab === t.id)} onClick={() => setTab(t.id)}>
+          <button 
+            key={t.id} 
+            className={`whitespace-nowrap px-4 py-2.5 md:px-[18px] md:py-[11px] text-[13px] border-none bg-transparent cursor-pointer transition-colors ${tab === t.id ? 'font-semibold text-white border-b-2 border-white' : 'font-normal text-white/80 hover:text-white border-b-2 border-transparent'}`}
+            onClick={() => setTab(t.id)}>
             {t.icon} {t.label}
           </button>
         ))}
       </div>
 
-      <div style={c.body}>
+      <div className="p-3 md:p-5 flex-1">
 
         {/* ══════════════════════════════ DASHBOARD ══════════════════════════════ */}
         {tab === "dashboard" && (
           <>
             {/* KPI Grid */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 16 }}>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-4 md:mb-5">
               {[
                 { label: "Total Pemasukan", val: fmtS(totalMasuk), color: "#6B705C", sub: `${pieMasuk.length} sumber`, subColor: "#6B705C" },
                 { label: "Total Pengeluaran", val: fmtS(totalKeluar), color: "#6b705c", sub: `${pieKeluar.length} kategori`, subColor: "#B18B5E" },
                 { label: "Laba Bersih", val: fmtS(laba), color: laba >= 0 ? "#6B705C" : "#B18B5E", sub: `Margin ${margin}%`, subColor: laba >= 0 ? "#6B705C" : "#B18B5E" },
                 { label: "Total Transaksi", val: txns.length, color: "#4A4A40", sub: "Periode ini", subColor: "#A5A58D" },
               ].map((m, i) => (
-                <div key={i} style={c.metric}>
-                  <div style={c.lbl}>{m.label}</div>
-                  <div style={c.num(m.color?.toString())}>{m.val}</div>
-                  <div style={{ fontSize: 11, color: m.subColor, marginTop: 5, fontWeight: 500 }}>{m.sub}</div>
+                <div key={i} className="bg-[#dad2c6] text-[#6b705c] rounded-[16px] md:rounded-[24px] p-3.5 md:p-4 border border-[#DCD9CC]">
+                  <div className="text-[10px] md:text-[11px] text-[#A5A58D] mb-1 tracking-[0.3px] uppercase">{m.label}</div>
+                  <div className="text-lg md:text-[20px] font-semibold tracking-[-0.5px]" style={{ color: m.color }}>{m.val}</div>
+                  <div className="text-[10px] md:text-[11px] mt-1.5 font-medium" style={{ color: m.subColor }}>{m.sub}</div>
                 </div>
               ))}
             </div>
 
             {/* Line Chart — Arus Kas */}
-            <div style={{ ...c.card, marginBottom: 14 }}>
-              <div style={c.sTitle}>Grafik Arus Kas Harian — {filterMonth ? new Date(filterMonth + "-01").toLocaleDateString('id-ID', { year: 'numeric', month: 'long' }) : "Semua Periode"}</div>
-              <div style={{ display: "flex", gap: 16, marginBottom: 10 }}>
+            <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm mb-4">
+              <div className="text-sm md:text-base font-semibold mb-3 text-[#4A4A40]">Grafik Arus Kas Harian — {filterMonth ? new Date(filterMonth + "-01").toLocaleDateString('id-ID', { year: 'numeric', month: 'long' }) : "Semua Periode"}</div>
+              <div className="flex flex-wrap gap-4 mb-3">
                 {[["#6B705C","Pemasukan"],["#B18B5E","Pengeluaran"]].map(([col, lbl]) => (
-                  <span key={lbl} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:"#A5A58D" }}>
-                    <span style={{ width:18, height:3, background:col, borderRadius:2, display:"inline-block" }}></span>{lbl}
+                  <span key={lbl} className="flex items-center gap-1.5 text-[11px] md:text-[12px] text-[#A5A58D]">
+                    <span className="w-[18px] h-[3px] rounded-sm" style={{ background: col }}></span>{lbl}
                   </span>
                 ))}
               </div>
-              <ResponsiveContainer width="100%" height={210}>
-                <LineChart data={dailyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#DCD9CC" vertical={false} />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#A5A58D' }} tickLine={false} axisLine={false} />
-                  <YAxis tickFormatter={v => `${(v/1000000).toFixed(1)}jt`} tick={{ fontSize: 11, fill: '#A5A58D' }} tickLine={false} axisLine={false} />
-                  <Tooltip content={<CustomTip />} />
-                  <Line type="monotone" dataKey="masuk" name="Pemasukan" stroke="#6B705C" strokeWidth={2} dot={{ r: 3, fill:"#6B705C" }} activeDot={{ r: 5 }} />
-                  <Line type="monotone" dataKey="keluar" name="Pengeluaran" stroke="#B18B5E" strokeWidth={2} strokeDasharray="5 3" dot={{ r: 3, fill:"#B18B5E" }} activeDot={{ r: 5 }} />
-                </LineChart>
-              </ResponsiveContainer>
+              <div className="h-[180px] md:h-[210px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={dailyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#DCD9CC" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#A5A58D' }} tickLine={false} axisLine={false} />
+                    <YAxis tickFormatter={v => `${(v/1000000).toFixed(1)}jt`} tick={{ fontSize: 11, fill: '#A5A58D' }} tickLine={false} axisLine={false} />
+                    <Tooltip content={<CustomTip />} />
+                    <Line type="monotone" dataKey="masuk" name="Pemasukan" stroke="#6B705C" strokeWidth={2} dot={{ r: 3, fill:"#6B705C" }} activeDot={{ r: 5 }} />
+                    <Line type="monotone" dataKey="keluar" name="Pengeluaran" stroke="#B18B5E" strokeWidth={2} strokeDasharray="5 3" dot={{ r: 3, fill:"#B18B5E" }} activeDot={{ r: 5 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
             </div>
 
             {/* Pie + Bar row */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 md:gap-4">
               {/* Pie Pengeluaran */}
-              <div style={c.card}>
-                <div style={c.sTitle}>Breakdown Pengeluaran</div>
-                <div style={{ display: "flex", alignItems: "center" }}>
-                  <ResponsiveContainer width={160} height={160}>
-                    <PieChart>
-                      <Pie data={pieKeluar} cx="50%" cy="50%" innerRadius={42} outerRadius={68} dataKey="value" nameKey="name" paddingAngle={2}>
-                        {pieKeluar.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                      </Pie>
-                      <Tooltip formatter={(v: number) => fmtS(v)} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div style={{ flex: 1, marginLeft: 12 }}>
+              <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm">
+                <div className="text-sm md:text-base font-semibold mb-3 text-[#4A4A40]">Breakdown Pengeluaran</div>
+                <div className="flex items-center flex-col sm:flex-row gap-4 sm:gap-0">
+                  <div className="w-[140px] h-[140px] md:w-[160px] md:h-[160px] shrink-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie data={pieKeluar} cx="50%" cy="50%" innerRadius={42} outerRadius={68} dataKey="value" nameKey="name" paddingAngle={2}>
+                          {pieKeluar.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                        </Pie>
+                        <Tooltip formatter={(v: number) => fmtS(v)} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="flex-1 sm:ml-4 w-full">
                     {pieKeluar.map((d, i) => (
-                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                        <span style={{ width: 8, height: 8, borderRadius: 2, background: PIE_COLORS[i % PIE_COLORS.length], flexShrink: 0 }}></span>
-                        <span style={{ fontSize: 11, color: "#A5A58D", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</span>
-                        <span style={{ fontSize: 11, fontWeight: 500, color: '#4A4A40' }}>{fmtS(d.value)}</span>
+                      <div key={i} className="flex items-center gap-1.5 mb-1.5">
+                        <span className="w-2 h-2 rounded-[2px] shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }}></span>
+                        <span className="text-[10px] md:text-[11px] text-[#A5A58D] flex-1 truncate">{d.name}</span>
+                        <span className="text-[11px] font-medium text-[#4A4A40] whitespace-nowrap">{fmtS(d.value)}</span>
                       </div>
                     ))}
                   </div>
@@ -400,38 +519,51 @@ export default function App() {
               </div>
 
               {/* Bar Sumber Pendapatan */}
-              <div style={c.card}>
-                <div style={c.sTitle}>Sumber Pemasukan</div>
-                <ResponsiveContainer width="100%" height={180}>
-                  <BarChart data={pieMasuk} layout="vertical" margin={{ left: -10, right: 16, top: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#DCD9CC" horizontal={false} />
-                    <XAxis type="number" tickFormatter={v => `${(v/1000000).toFixed(1)}jt`} tick={{ fontSize: 10, fill: '#A5A58D' }} axisLine={false} tickLine={false} />
-                    <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: '#4A4A40' }} width={90} axisLine={false} tickLine={false} />
-                    <Tooltip content={<CustomTip />} cursor={{fill: '#DCD9CC'}} />
-                    <Bar dataKey="value" name="Jumlah" fill="#6B705C" radius={[0, 4, 4, 0]} barSize={16} />
-                  </BarChart>
-                </ResponsiveContainer>
+              <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm">
+                <div className="text-sm md:text-base font-semibold mb-3 text-[#4A4A40]">Sumber Pemasukan</div>
+                <div className="h-[180px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={pieMasuk} layout="vertical" margin={{ left: -10, right: 16, top: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#DCD9CC" horizontal={false} />
+                      <XAxis type="number" tickFormatter={v => `${(v/1000000).toFixed(1)}jt`} tick={{ fontSize: 10, fill: '#A5A58D' }} axisLine={false} tickLine={false} />
+                      <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: '#4A4A40' }} width={90} axisLine={false} tickLine={false} />
+                      <Tooltip content={<CustomTip />} cursor={{fill: '#DCD9CC'}} />
+                      <Bar dataKey="value" name="Jumlah" fill="#6B705C" radius={[0, 4, 4, 0]} barSize={16} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             </div>
 
             {/* Quick recent txns */}
-            <div style={{ ...c.card, marginTop: 14 }}>
-              <div style={c.sTitle}>5 Transaksi Terakhir</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {[...txns].reverse().slice(0, 5).map(t => (
-                  <div key={t.id} style={{ display: "flex", alignItems: "center", padding: "8px 12px", background: "#FAF9F6", borderRadius: '8px', border: "1px solid #DCD9CC" }}>
-                    <div style={{ width: 32, height: 32, borderRadius: '50%', background: t.type === "masuk" ? "#E8E6DB" : "#F0EEE4", display: "flex", alignItems: "center", justifyContent: "center", marginRight: 12, fontSize: 14, flexShrink: 0, color: t.type === "masuk" ? "#6B705C" : "#B18B5E" }}>
+            <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm mt-3 md:mt-4">
+              <div className="flex justify-between items-center mb-3">
+                <div className="text-sm md:text-base font-semibold text-[#4A4A40]">5 Transaksi Terakhir</div>
+              </div>
+              <div className="flex flex-col gap-2">
+                {[...globalFilteredTxns].reverse().slice(0, 5).map(t => (
+                  <div key={t.id} className="flex items-center p-2.5 md:p-3 bg-[#FAF9F6] rounded-lg border border-[#DCD9CC] hover:bg-white transition-colors group">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center mr-3 text-sm shrink-0 ${t.type === "masuk" ? "bg-[#E8E6DB] text-[#6B705C]" : "bg-[#F0EEE4] text-[#B18B5E]"}`}>
                       {t.type === "masuk" ? "↑" : "↓"}
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: '#4A4A40' }}>{t.desc}</div>
-                      <div style={{ fontSize: 11, color: "#A5A58D", marginTop: 2 }}>{t.date} • {t.cat}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12px] md:text-[13px] font-medium truncate text-[#4A4A40]">{t.desc}</div>
+                      <div className="text-[10px] md:text-[11px] text-[#A5A58D] mt-0.5">{t.date} • {t.cat}</div>
                     </div>
-                    <div style={{ fontWeight: 600, fontSize: 13, color: t.type === "masuk" ? "#6B705C" : "#B18B5E", marginLeft: 10 }}>
-                      {t.type === "masuk" ? "+" : "−"}{fmtS(t.amount)}
+                    <div className="flex items-center gap-2 md:gap-3">
+                      <div className={`font-semibold text-[12px] md:text-[13px] ${t.type === "masuk" ? "text-[#6B705C]" : "text-[#B18B5E]"}`}>
+                        {t.type === "masuk" ? "+" : "−"}{fmtS(t.amount)}
+                      </div>
+                      <div className="flex gap-1 pl-2 md:pl-3 border-l border-[#DCD9CC] opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => startEdit(t)} className="bg-transparent border-none cursor-pointer text-[#6B705C] px-1 md:px-1.5 py-1 rounded hover:bg-black/5 text-[14px]">✏️</button>
+                        <button onClick={() => setDeleteId(t.id)} className="bg-transparent border-none cursor-pointer text-[#B18B5E] px-1 md:px-1.5 py-1 rounded hover:bg-black/5 text-[14px]">🗑️</button>
+                      </div>
                     </div>
                   </div>
                 ))}
+                {globalFilteredTxns.length === 0 && (
+                  <div className="text-center text-[12px] md:text-[13px] text-[#A5A58D] py-4">Belum ada transaksi di periode ini.</div>
+                )}
               </div>
             </div>
           </>
@@ -439,25 +571,28 @@ export default function App() {
 
         {/* ══════════════════════════════ TRANSAKSI ══════════════════════════════ */}
         {tab === "transaksi" && (
-          <div style={{ display: "flex", gap: 16 }}>
-
+          <div className="flex flex-col lg:flex-row gap-4 md:gap-5">
             {/* Form Panel */}
-            <div style={{ ...c.card, width: 300, flexShrink: 0, alignSelf: 'flex-start', backgroundColor: '#125927' }}>
-              <div style={c.sTitle}>Tambah Transaksi Baru</div>
+            <div className="w-full lg:w-[320px] shrink-0 self-start bg-[#125927] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm border border-[#DCD9CC]">
+              <div className="text-white text-base font-semibold mb-4 text-[#fff]">Tambah Transaksi Baru</div>
 
               {msg && (
-                <div style={{ padding: "9px 12px", borderRadius: 8, background: msg.ok ? "#E8E6DB" : "#F0EEE4", color: msg.ok ? "#6B705C" : "#B18B5E", fontSize: 12, marginBottom: 12, border: `1px solid ${msg.ok ? '#DCD9CC' : '#DCD9CC'}` }}>
+                <div className={`px-3 py-2.5 rounded-lg text-xs mb-3 border ${msg.ok ? "bg-[#E8E6DB] text-[#6B705C] border-[#DCD9CC]" : "bg-[#F0EEE4] text-[#B18B5E] border-[#DCD9CC]"}`}>
                   {msg.ok ? "✓ " : "✕ "}{msg.text}
                 </div>
               )}
 
               {/* Type Toggle */}
-              <div style={{ marginBottom: 16 }}>
-                <div style={c.lbl}>Jenis Transaksi</div>
-                <div style={{ display: "flex", gap: 8 }}>
+              <div className="mb-4">
+                <div className="text-[11px] text-white mb-1.5 tracking-[0.3px] uppercase opacity-90">Jenis Transaksi</div>
+                <div className="flex gap-2">
                   {[["masuk","Pemasukan","↑","#6B705C"],["keluar","Pengeluaran","↓","#B18B5E"]].map(([val, lbl, arrow, col]) => (
                     <button key={val} onClick={() => setForm(f => ({ ...f, type: val, cat: "" }))}
-                      style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: `1.5px solid ${form.type === val ? col : "#DCD9CC"}`, background: form.type === val ? col + "12" : "#fff", color: val === "masuk" ? "#fdfffb" : form.type === val ? col : "#A5A58D", fontWeight: form.type === val ? 600 : 400, fontSize: 13, cursor: "pointer", transition: 'all 0.2s' }}>
+                      className={`flex-1 py-2 rounded-lg border-[1.5px] font-medium text-[13px] cursor-pointer transition-all ${
+                        form.type === val 
+                          ? (val === "masuk" ? "border-[#6B705C] bg-[#6B705C]/10 text-white font-semibold" : "border-[#B18B5E] bg-[#B18B5E]/10 text-[#B18B5E] font-semibold") 
+                          : "border-[#DCD9CC] bg-white text-[#A5A58D]"
+                      }`}>
                       {arrow} {lbl}
                     </button>
                   ))}
@@ -466,62 +601,70 @@ export default function App() {
 
               {/* Fields */}
               {[
-                { label: "Tanggal", el: <input type="date" style={c.input} value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /> },
-                { label: "Deskripsi", el: <input type="text" style={c.input} placeholder="Keterangan singkat..." value={form.desc} onChange={e => setForm(f => ({ ...f, desc: e.target.value }))} /> },
+                { label: "Tanggal", el: <input type="date" className="w-full p-2.5 rounded-lg border-[0.5px] border-[#DCD9CC] bg-white text-[#4A4A40] text-[13px] box-border" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /> },
+                { label: "Deskripsi", el: <input type="text" className="w-full p-2.5 rounded-lg border-[0.5px] border-[#DCD9CC] bg-white text-[#4A4A40] text-[13px] box-border" placeholder="Keterangan singkat..." value={form.desc} onChange={e => setForm(f => ({ ...f, desc: e.target.value }))} /> },
                 { label: "Kategori", el: (
-                  <select style={c.input} value={form.cat} onChange={e => setForm(f => ({ ...f, cat: e.target.value }))}>
+                  <select className="w-full p-2.5 rounded-lg border-[0.5px] border-[#DCD9CC] bg-white text-[#4A4A40] text-[13px] box-border" value={form.cat} onChange={e => setForm(f => ({ ...f, cat: e.target.value }))}>
                     <option value="">Pilih kategori...</option>
-                    {cats.map(c => <option key={c} value={c}>{c}</option>)}
+                    {cats.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                   </select>
                 )},
                 { label: "Nominal (Rp)", el: (
-                  <div style={{ position: "relative" }}>
-                    <span style={{ position: "absolute", left: 12, top: 10, color: "#A5A58D", fontSize: 13 }}>Rp</span>
-                    <input type="text" style={{ ...c.input, paddingLeft: 36 }} placeholder="0" value={form.amount} onChange={e => {
+                  <div className="relative">
+                    <span className="absolute left-3 top-2.5 text-[#A5A58D] text-[13px]">Rp</span>
+                    <input type="text" className="w-full p-2.5 pl-9 rounded-lg border-[0.5px] border-[#DCD9CC] bg-white text-[#4A4A40] text-[13px] box-border" placeholder="0" value={form.amount} onChange={e => {
                       const val = e.target.value.replace(/\D/g, "");
                       setForm(f => ({ ...f, amount: val ? parseInt(val, 10).toLocaleString('id-ID') : "" }));
                     }} />
                   </div>
                 )},
               ].map(({ label, el }) => (
-                <div key={label} style={{ marginBottom: 12 }}>
-                  <div style={c.lbl}>{label}</div>
+                <div key={label} className="mb-3">
+                  <div className="text-[11px] text-white mb-1.5 tracking-[0.3px] uppercase opacity-90">{label}</div>
                   {el}
                 </div>
               ))}
 
-              <button onClick={addTxn} style={{ width: "100%", padding: "10px 0", borderRadius: 8, border: "none", backgroundColor: "#367609", color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer", marginTop: 4, transition: 'background 0.2s' }}>
-                + Simpan Transaksi
-              </button>
+              <div className="flex gap-2 mt-1">
+                <button onClick={addTxn} className={`flex-1 py-2.5 rounded-lg border-none text-white font-semibold text-[13px] cursor-pointer transition-colors ${editId ? "bg-[#B18B5E] hover:bg-[#a07c52]" : "bg-[#367609] hover:bg-[#2e6408]"}`}>
+                  {editId ? "✓ Simpan Perubahan" : "+ Simpan Transaksi"}
+                </button>
+                {editId && (
+                  <button onClick={cancelEdit} className="py-2.5 px-4 rounded-lg border border-[#DCD9CC] bg-[#FAF9F6] text-[#4A4A40] font-semibold text-[13px] cursor-pointer hover:bg-white transition-colors">
+                    Batal
+                  </button>
+                )}
+              </div>
 
               {/* Mini summary */}
-              <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px dashed #DCD9CC" }}>
-                <div style={{ ...c.lbl, marginBottom: 4 }}>Saldo Saat Ini</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: laba >= 0 ? "#6B705C" : "#B18B5E", letterSpacing: '-0.5px' }}>{fmtS(laba)}</div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12, background: '#FAF9F6', padding: '10px', borderRadius: '8px' }}>
+              <div className="mt-5 pt-4 border-t border-dashed border-white/30">
+                <div className="text-[11px] text-white mb-1 tracking-[0.3px] uppercase opacity-90">Saldo Saat Ini</div>
+                <div className={`text-xl md:text-2xl font-bold tracking-[-0.5px] ${laba >= 0 ? "text-white" : "text-[#ffb0b0]"}`}>{fmtS(laba)}</div>
+                <div className="flex justify-between mt-3 bg-white/10 p-3 rounded-lg">
                   <div>
-                    <div style={{fontSize: 10, color: '#A5A58D', textTransform: 'uppercase', marginBottom: 2}}>Total Masuk</div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#6B705C" }}>{fmtS(totalMasuk)}</div>
+                    <div className="text-[10px] text-white/70 uppercase mb-0.5">Total Masuk</div>
+                    <div className="text-[13px] font-semibold text-white">{fmtS(totalMasuk)}</div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{fontSize: 10, color: '#A5A58D', textTransform: 'uppercase', marginBottom: 2}}>Total Keluar</div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#B18B5E" }}>{fmtS(totalKeluar)}</div>
+                  <div className="text-right">
+                    <div className="text-[10px] text-white/70 uppercase mb-0.5">Total Keluar</div>
+                    <div className="text-[13px] font-semibold text-[#ffb0b0]">{fmtS(totalKeluar)}</div>
                   </div>
                 </div>
               </div>
             </div>
 
             {/* Transaction List */}
-            <div style={{ ...c.card, flex: 1, minWidth: 0, position: 'relative' }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24, paddingBottom: 16, borderBottom: '1px solid #DCD9CC' }}>
-                <div style={c.sTitle}>Riwayat Transaksi ({filteredTxns.length})</div>
-                <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-                  <button onClick={exportCSV} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #A5A58D", backgroundColor: "#007a07", color: "#3b3b27", fontSize: 13, cursor: "pointer", fontWeight: 600, transition: 'background 0.2s', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div className="flex-1 min-w-0 relative bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm overflow-hidden flex flex-col">
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-4 md:mb-6 pb-4 border-b border-[#DCD9CC] gap-3 md:gap-0">
+                <div className="text-base font-semibold text-[#4A4A40]">Riwayat Transaksi ({filteredTxns.length})</div>
+                <div className="flex flex-wrap gap-2 md:gap-4 items-center">
+                  <button onClick={exportCSV} className="py-2 px-3 md:px-4 rounded-lg border border-[#A5A58D] bg-[#007a07] text-white text-[12px] md:text-[13px] font-semibold cursor-pointer transition-colors flex items-center gap-1.5 hover:bg-[#006606]">
                     📥 Ekspor CSV
                   </button>
-                  <div style={{ display: "flex", gap: 6, background: '#DCD9CC', padding: '4px', borderRadius: '8px' }}>
+                  <div className="flex gap-1.5 bg-[#DCD9CC] p-1 rounded-lg">
                     {[["semua","Semua"],["masuk","Masuk"],["keluar","Keluar"]].map(([val, lbl]) => (
-                      <button key={val} onClick={() => setFilterType(val)} style={{ padding: "6px 14px", borderRadius: 6, border: "none", fontSize: 12, cursor: "pointer", background: filterType === val ? "#fff" : "transparent", color: filterType === val ? "#4A4A40" : "#A5A58D", fontWeight: filterType === val ? 600 : 500, boxShadow: filterType === val ? "0 1px 2px rgba(0,0,0,0.05)" : "none", transition: 'all 0.2s' }}>
+                      <button key={val} onClick={() => setFilterType(val)} 
+                        className={`py-1.5 px-3 md:px-3.5 rounded-md border-none text-[11px] md:text-[12px] cursor-pointer transition-all ${filterType === val ? "bg-white text-[#4A4A40] font-semibold shadow-sm" : "bg-transparent text-[#A5A58D] font-medium hover:text-[#4A4A40]"}`}>
                         {lbl}
                       </button>
                     ))}
@@ -529,45 +672,48 @@ export default function App() {
                 </div>
               </div>
 
-              <div style={{ maxHeight: 520, overflowY: "auto", paddingRight: '8px' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
-                  <thead style={{ position: 'sticky', top: 0, background: '#FAF9F6', zIndex: 1, boxShadow: '0 1px 0 #DCD9CC' }}>
+              <div className="flex-1 overflow-y-auto overflow-x-auto min-h-[300px] pr-1 md:pr-2">
+                <table className="w-full border-collapse text-[12px] md:text-[13px] text-left whitespace-nowrap md:whitespace-normal">
+                  <thead className="sticky top-0 bg-[#FAF9F6] z-10 shadow-[0_1px_0_#DCD9CC]">
                     <tr>
-                      <th style={{ padding: '12px 16px', color: '#A5A58D', fontWeight: 600, width: '15%' }}>Tanggal</th>
-                      <th style={{ padding: '12px 16px', color: '#A5A58D', fontWeight: 600, width: '35%' }}>Keterangan</th>
-                      <th style={{ padding: '12px 16px', color: '#A5A58D', fontWeight: 600, textAlign: 'right' }}>Debet (Masuk)</th>
-                      <th style={{ padding: '12px 16px', color: '#A5A58D', fontWeight: 600, textAlign: 'right' }}>Kredit (Keluar)</th>
-                      <th style={{ padding: '12px 16px', color: '#A5A58D', fontWeight: 600, textAlign: 'center', width: '60px' }}>Aksi</th>
-                      {filterType === 'semua' && <th style={{ padding: '12px 16px', color: '#A5A58D', fontWeight: 600, textAlign: 'right' }}>Saldo</th>}
+                      <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold md:w-[15%]">Tanggal</th>
+                      <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold md:w-[35%] whitespace-normal">Keterangan</th>
+                      <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-right">Debet (Masuk)</th>
+                      <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-right">Kredit (Keluar)</th>
+                      <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-center w-[60px]">Aksi</th>
+                      {filterType === 'semua' && <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-right">Saldo</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {filteredTxns.length === 0 ? (
                       <tr>
-                        <td colSpan={filterType === 'semua' ? 6 : 5} style={{ padding: '30px', textAlign: 'center', color: '#A5A58D' }}>Tidak ada transaksi.</td>
+                        <td colSpan={filterType === 'semua' ? 6 : 5} className="py-8 text-center text-[#A5A58D]">Tidak ada transaksi.</td>
                       </tr>
                     ) : (
                       filteredTxns.map((t, index) => (
-                        <tr key={t.id} style={{ borderBottom: '1px solid #E8E6DB', background: index % 2 === 0 ? '#fff' : '#FAF9F6' }}>
-                          <td style={{ padding: '12px 16px', color: '#4A4A40' }}>{new Date(t.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
-                          <td style={{ padding: '12px 16px' }}>
-                            <div style={{ fontWeight: 500, color: '#4A4A40' }}>{t.desc}</div>
-                            <div style={{ fontSize: 11, color: '#A5A58D', marginTop: 4 }}>{t.cat}</div>
+                        <tr key={t.id} className={`border-b border-[#E8E6DB] ${index % 2 === 0 ? 'bg-white' : 'bg-[#FAF9F6]'} hover:bg-gray-50`}>
+                          <td className="py-3 px-3 md:px-4 text-[#4A4A40]">{new Date(t.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                          <td className="py-3 px-3 md:px-4">
+                            <div className="font-medium text-[#4A4A40] w-32 sm:w-auto truncate md:whitespace-normal xl:line-clamp-2">{t.desc}</div>
+                            <div className="text-[11px] text-[#A5A58D] mt-1">{t.cat}</div>
                           </td>
-                          <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 500, color: '#6B705C' }}>
+                          <td className="py-3 px-3 md:px-4 text-right font-medium text-[#6B705C]">
                             {t.type === 'masuk' ? fmt(t.amount) : '-'}
                           </td>
-                          <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 500, color: '#B18B5E' }}>
+                          <td className="py-3 px-3 md:px-4 text-right font-medium text-[#B18B5E]">
                            {t.type === 'keluar' ? fmt(t.amount) : '-'}
                           </td>
-                          <td style={{ padding: '12px 16px', textAlign: 'center' }}>
-                            <button onClick={() => setDeleteId(t.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B18B5E', padding: '4px 8px', borderRadius: '4px', fontSize: 16 }}>
+                          <td className="py-3 px-3 md:px-4 text-center whitespace-nowrap">
+                            <button onClick={() => startEdit(t)} className="bg-transparent border-none cursor-pointer text-[#6B705C] px-1 md:px-2 py-1 rounded hover:bg-black/5 text-[14px] md:text-[16px]">
+                              ✏️
+                            </button>
+                            <button onClick={() => setDeleteId(t.id)} className="bg-transparent border-none cursor-pointer text-[#B18B5E] px-1 md:px-2 py-1 rounded hover:bg-black/5 text-[14px] md:text-[16px]">
                               🗑️
                             </button>
                           </td>
                           {filterType === 'semua' && (
-                            <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 600, color: t.saldo >= 0 ? '#6B705C' : '#B18B5E' }}>
-                              {fmt(t.saldo)}
+                            <td className={`py-3 px-3 md:px-4 text-right font-semibold ${(t as any).saldo >= 0 ? 'text-[#6B705C]' : 'text-[#B18B5E]'}`}>
+                              {fmt((t as any).saldo)}
                             </td>
                           )}
                         </tr>
@@ -584,64 +730,64 @@ export default function App() {
         {tab === "laporan" && (
           <>
             {/* P&L Summary */}
-            <div style={{ ...c.card, marginBottom: 16 }}>
-              <div style={{ ...c.sTitle, marginBottom: 16 }}>Laporan Laba Rugi — {filterMonth ? filterMonth : "Semua Periode"}</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 260px", gap: 24 }}>
+            <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm mb-4">
+              <div className="text-sm md:text-base font-semibold mb-4 text-[#4A4A40]">Laporan Laba Rugi — {filterMonth ? filterMonth : "Semua Periode"}</div>
+              <div className="flex flex-col lg:grid lg:grid-cols-[1fr_1fr_260px] gap-6">
 
                 {/* Pendapatan */}
                 <div>
-                  <div style={{ fontSize: 11, color: "#6B705C", fontWeight: 700, marginBottom: 12, letterSpacing: 0.5 }}>PENDAPATAN</div>
-                  <div style={{ background: '#FAF9F6', borderRadius: '8px', padding: '8px 12px', border: '1px solid #DCD9CC' }}>
+                  <div className="text-[11px] text-[#6B705C] font-bold mb-3 tracking-[0.5px]">PENDAPATAN</div>
+                  <div className="bg-[#FAF9F6] rounded-lg p-2.5 px-3 border border-[#DCD9CC]">
                   {pieMasuk.map((d, i) => (
-                    <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "8px 0", borderBottom: i < pieMasuk.length-1 ? "1px dashed #DCD9CC" : "none" }}>
-                      <span style={{ color: "#A5A58D" }}>{d.name}</span>
-                      <span style={{ fontWeight: 500, color: "#6B705C" }}>{fmt(d.value)}</span>
+                    <div key={i} className={`flex justify-between text-[13px] py-2 ${i < pieMasuk.length-1 ? "border-b border-dashed border-[#DCD9CC]" : ""}`}>
+                      <span className="text-[#A5A58D]">{d.name}</span>
+                      <span className="font-medium text-[#6B705C]">{fmt(d.value)}</span>
                     </div>
                   ))}
-                  {pieMasuk.length === 0 && <div style={{ fontSize: 12, color: '#A5A58D', padding: '4px 0' }}>Belum ada data</div>}
+                  {pieMasuk.length === 0 && <div className="text-[12px] text-[#A5A58D] py-1">Belum ada data</div>}
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 700, marginTop: 12, color: "#6B705C", padding: '0 4px' }}>
+                  <div className="flex justify-between text-[13px] md:text-[14px] font-bold mt-3 text-[#6B705C] px-1">
                     <span>Total Pendapatan</span><span>{fmt(totalMasuk)}</span>
                   </div>
                 </div>
 
                 {/* Pengeluaran */}
                 <div>
-                  <div style={{ fontSize: 11, color: "#B18B5E", fontWeight: 700, marginBottom: 12, letterSpacing: 0.5 }}>PENGELUARAN</div>
-                  <div style={{ background: '#FAF9F6', borderRadius: '8px', padding: '8px 12px', border: '1px solid #DCD9CC' }}>
+                  <div className="text-[11px] text-[#B18B5E] font-bold mb-3 tracking-[0.5px]">PENGELUARAN</div>
+                  <div className="bg-[#FAF9F6] rounded-lg p-2.5 px-3 border border-[#DCD9CC]">
                   {pieKeluar.map((d, i) => (
-                    <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "8px 0", borderBottom: i < pieKeluar.length-1 ? "1px dashed #DCD9CC" : "none" }}>
-                      <span style={{ color: "#A5A58D" }}>{d.name}</span>
-                      <span style={{ fontWeight: 500, color: "#B18B5E" }}>{fmt(d.value)}</span>
+                    <div key={i} className={`flex justify-between text-[13px] py-2 ${i < pieKeluar.length-1 ? "border-b border-dashed border-[#DCD9CC]" : ""}`}>
+                      <span className="text-[#A5A58D]">{d.name}</span>
+                      <span className="font-medium text-[#B18B5E]">{fmt(d.value)}</span>
                     </div>
                   ))}
-                  {pieKeluar.length === 0 && <div style={{ fontSize: 12, color: '#A5A58D', padding: '4px 0' }}>Belum ada data</div>}
+                  {pieKeluar.length === 0 && <div className="text-[12px] text-[#A5A58D] py-1">Belum ada data</div>}
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, fontWeight: 700, marginTop: 12, color: "#B18B5E", padding: '0 4px' }}>
+                  <div className="flex justify-between text-[13px] md:text-[14px] font-bold mt-3 text-[#B18B5E] px-1">
                     <span>Total Pengeluaran</span><span>{fmt(totalKeluar)}</span>
                   </div>
                 </div>
 
                 {/* Ringkasan Box */}
-                <div style={{ background: laba >= 0 ? "#E8E6DB" : "#F0EEE4", borderRadius: 12, padding: "20px" }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: laba >= 0 ? "#6B705C" : "#B18B5E", marginBottom: 16, letterSpacing: 0.5 }}>RINGKASAN L/R</div>
+                <div className={`rounded-xl p-5 ${laba >= 0 ? "bg-[#E8E6DB]" : "bg-[#F0EEE4]"}`}>
+                  <div className={`text-[11px] font-bold mb-4 tracking-[0.5px] ${laba >= 0 ? "text-[#6B705C]" : "text-[#B18B5E]"}`}>RINGKASAN L/R</div>
                   {[
-                    { lbl: "Pendapatan", val: fmt(totalMasuk), col: "#6B705C" },
-                    { lbl: "Pengeluaran", val: fmt(totalKeluar), col: "#B18B5E" },
+                    { lbl: "Pendapatan", val: fmt(totalMasuk), col: "text-[#6B705C]" },
+                    { lbl: "Pengeluaran", val: fmt(totalKeluar), col: "text-[#B18B5E]" },
                   ].map(m => (
-                    <div key={m.lbl} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, alignItems: 'center' }}>
-                      <div style={{ fontSize: 12, color: "#A5A58D" }}>{m.lbl}</div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: m.col }}>{m.val}</div>
+                    <div key={m.lbl} className="flex justify-between mb-2 items-center">
+                      <div className="text-[12px] text-[#A5A58D]">{m.lbl}</div>
+                      <div className={`text-[13px] font-semibold ${m.col}`}>{m.val}</div>
                     </div>
                   ))}
-                  <div style={{ borderTop: `1px solid ${laba >= 0 ? "#A5A58D" : "#DCD9CC"}`, paddingTop: 16, marginTop: 12 }}>
-                    <div style={{ fontSize: 12, color: "#A5A58D", marginBottom: 4 }}>Laba Bersih</div>
-                    <div style={{ fontSize: 24, fontWeight: 800, color: laba >= 0 ? "#6B705C" : "#B18B5E", letterSpacing: "-0.5px" }}>{fmt(laba)}</div>
-                    <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-                      <div style={{ background: laba >= 0 ? "#DCD9CC" : "#F0EEE4", borderRadius: 6, padding: "4px 8px", fontSize: 11, fontWeight: 600, color: laba >= 0 ? "#6B705C" : "#B18B5E", border: `1px solid ${laba >= 0 ? '#DCD9CC' : '#DCD9CC'}` }}>
+                  <div className={`pt-4 mt-3 border-t ${laba >= 0 ? "border-[#A5A58D]" : "border-[#DCD9CC]"}`}>
+                    <div className="text-[12px] text-[#A5A58D] mb-1">Laba Bersih</div>
+                    <div className={`text-[20px] md:text-[24px] font-bold tracking-[-0.5px] ${laba >= 0 ? "text-[#6B705C]" : "text-[#B18B5E]"}`}>{fmt(laba)}</div>
+                    <div className="flex gap-2 mt-3 flex-wrap">
+                      <div className={`rounded-md px-2 py-1 text-[11px] font-semibold border ${laba >= 0 ? "bg-[#DCD9CC] text-[#6B705C] border-[#DCD9CC]" : "bg-[#F0EEE4] text-[#B18B5E] border-[#DCD9CC]"}`}>
                         Margin {margin}%
                       </div>
-                      <div style={{ background: laba >= 0 ? "#DCD9CC" : "#F0EEE4", borderRadius: 6, padding: "4px 8px", fontSize: 11, fontWeight: 600, color: laba >= 0 ? "#6B705C" : "#B18B5E", border: `1px solid ${laba >= 0 ? '#DCD9CC' : '#DCD9CC'}` }}>
+                      <div className={`rounded-md px-2 py-1 text-[11px] font-semibold border ${laba >= 0 ? "bg-[#DCD9CC] text-[#6B705C] border-[#DCD9CC]" : "bg-[#F0EEE4] text-[#B18B5E] border-[#DCD9CC]"}`}>
                         {laba >= 0 ? "✓ Surplus" : "✕ Defisit"}
                       </div>
                     </div>
@@ -651,30 +797,30 @@ export default function App() {
             </div>
 
             {/* Laporan Arus Kas */}
-            <div style={{ ...c.card, marginBottom: 16 }}>
-              <div style={c.sTitle}>Laporan Arus Kas — {filterMonth ? filterMonth : "Semua Periode"}</div>
-              <div style={{ background: '#FAF9F6', borderRadius: '12px', padding: '16px 20px', border: '1px solid #DCD9CC' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+            <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm mb-4">
+              <div className="text-sm md:text-base font-semibold mb-3 text-[#4A4A40]">Laporan Arus Kas — {filterMonth ? filterMonth : "Semua Periode"}</div>
+              <div className="bg-[#FAF9F6] rounded-xl p-4 md:p-5 border border-[#DCD9CC] overflow-x-auto">
+                <table className="w-full border-collapse text-[13px] md:text-[14px]">
                   <tbody>
-                    <tr>
-                      <td style={{ padding: '12px 0', color: '#6B705C', fontWeight: 600 }}>Arus Kas Masuk (Penerimaan)</td>
-                      <td style={{ padding: '12px 0', textAlign: 'right', fontWeight: 600, color: '#6B705C' }}>{fmt(totalMasuk)}</td>
+                    <tr className="border-b border-transparent">
+                      <td className="py-2.5 md:py-3 text-[#6B705C] font-semibold whitespace-nowrap min-w-[200px]">Arus Kas Masuk (Penerimaan)</td>
+                      <td className="py-2.5 md:py-3 text-right font-semibold text-[#6B705C]">{fmt(totalMasuk)}</td>
                     </tr>
                     <tr>
-                      <td style={{ padding: '4px 0 12px 16px', color: '#A5A58D', fontSize: 13 }}>Dari Pendapatan Operasional & Lainnya</td>
-                      <td style={{ padding: '4px 0 12px 16px', textAlign: 'right', color: '#A5A58D', fontSize: 13 }}>{fmt(totalMasuk)}</td>
+                      <td className="pb-3 pl-4 text-[#A5A58D] text-[12px] md:text-[13px] whitespace-normal">Dari Pendapatan Operasional & Lainnya</td>
+                      <td className="pb-3 text-right text-[#A5A58D] text-[12px] md:text-[13px]">{fmt(totalMasuk)}</td>
                     </tr>
-                    <tr style={{ borderTop: '1px dashed #DCD9CC' }}>
-                      <td style={{ padding: '12px 0', color: '#B18B5E', fontWeight: 600 }}>Arus Kas Keluar (Pengeluaran)</td>
-                      <td style={{ padding: '12px 0', textAlign: 'right', fontWeight: 600, color: '#B18B5E' }}>{fmt(totalKeluar)}</td>
+                    <tr className="border-t border-dashed border-[#DCD9CC]">
+                      <td className="py-2.5 md:py-3 text-[#B18B5E] font-semibold whitespace-nowrap min-w-[200px]">Arus Kas Keluar (Pengeluaran)</td>
+                      <td className="py-2.5 md:py-3 text-right font-semibold text-[#B18B5E]">{fmt(totalKeluar)}</td>
                     </tr>
                     <tr>
-                      <td style={{ padding: '4px 0 12px 16px', color: '#A5A58D', fontSize: 13 }}>Untuk Pembayaran Operasional & Kas</td>
-                      <td style={{ padding: '4px 0 12px 16px', textAlign: 'right', color: '#A5A58D', fontSize: 13 }}>{fmt(totalKeluar)}</td>
+                      <td className="pb-3 pl-4 text-[#A5A58D] text-[12px] md:text-[13px] whitespace-normal">Untuk Pembayaran Operasional & Kas</td>
+                      <td className="pb-3 text-right text-[#A5A58D] text-[12px] md:text-[13px]">{fmt(totalKeluar)}</td>
                     </tr>
-                    <tr style={{ borderTop: '2px solid #DCD9CC' }}>
-                      <td style={{ padding: '16px 0', color: '#4A4A40', fontWeight: 700, fontSize: 16 }}>Kenaikan/Penurunan Kas Bersih</td>
-                      <td style={{ padding: '16px 0', textAlign: 'right', fontWeight: 700, fontSize: 16, color: laba >= 0 ? '#6B705C' : '#B18B5E' }}>{fmt(laba)}</td>
+                    <tr className="border-t-2 border-[#DCD9CC]">
+                      <td className="py-3.5 md:py-4 text-[#4A4A40] font-bold text-[14px] md:text-[16px]">Kenaikan/Penurunan Kas Bersih</td>
+                      <td className={`py-3.5 md:py-4 text-right font-bold text-[14px] md:text-[16px] ${laba >= 0 ? "text-[#6B705C]" : "text-[#B18B5E]"}`}>{fmt(laba)}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -682,126 +828,98 @@ export default function App() {
             </div>
 
             {/* Bar Chart Comparison */}
-            <div style={c.card}>
-              <div style={c.sTitle}>Pemasukan vs Pengeluaran per Hari</div>
-              <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
+            <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm">
+              <div className="text-sm md:text-base font-semibold mb-3 text-[#4A4A40]">Pemasukan vs Pengeluaran per Hari</div>
+              <div className="flex gap-4 mb-3">
                 {[["#6B705C","Pemasukan"],["#B18B5E","Pengeluaran"]].map(([col, lbl]) => (
-                  <span key={lbl} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#A5A58D" }}>
-                    <span style={{ width: 12, height: 12, borderRadius: 3, background: col, display: "inline-block" }}></span>{lbl}
+                  <span key={lbl} className="flex items-center gap-1.5 text-[11px] md:text-[12px] text-[#A5A58D]">
+                    <span className="w-3 h-3 rounded-[3px]" style={{ background: col }}></span>{lbl}
                   </span>
                 ))}
               </div>
-              <ResponsiveContainer width="100%" height={230}>
-                <BarChart data={dailyData} barGap={4} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#DCD9CC" vertical={false} />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#A5A58D' }} tickLine={false} axisLine={false} />
-                  <YAxis tickFormatter={v => `${(v / 1000000).toFixed(1)}jt`} tick={{ fontSize: 11, fill: '#A5A58D' }} tickLine={false} axisLine={false} />
-                  <Tooltip content={<CustomTip />} cursor={{fill: '#DCD9CC'}} />
-                  <Bar dataKey="masuk" name="Pemasukan" fill="#6B705C" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="keluar" name="Pengeluaran" fill="#B18B5E" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <div className="w-full h-[200px] md:h-[230px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={dailyData} barGap={4} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#DCD9CC" vertical={false} />
+                    <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#A5A58D' }} tickLine={false} axisLine={false} />
+                    <YAxis tickFormatter={v => `${(v / 1000000).toFixed(1)}jt`} tick={{ fontSize: 11, fill: '#A5A58D' }} tickLine={false} axisLine={false} />
+                    <Tooltip content={<CustomTip />} cursor={{fill: '#DCD9CC'}} />
+                    <Bar dataKey="masuk" name="Pemasukan" fill="#6B705C" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="keluar" name="Pengeluaran" fill="#B18B5E" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
 
             {/* Rasio Keuangan */}
-            <div style={{ ...c.card, marginTop: 16 }}>
-              <div style={c.sTitle}>Metrik Usaha</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+            <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm mt-4">
+              <div className="text-sm md:text-base font-semibold mb-3 text-[#4A4A40]">Metrik Usaha</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {[
                   { lbl: "Gross Profit Margin", val: `${margin}%`, desc: "Laba / Pendapatan", good: parseFloat(margin.toString()) >= 20 },
                   { lbl: "Biaya vs Pendapatan", val: totalMasuk > 0 ? `${((totalKeluar / totalMasuk) * 100).toFixed(1)}%` : "—", desc: "Pengeluaran / Pendapatan", good: (totalKeluar / totalMasuk) < 0.8 },
                   { lbl: "Jumlah Transaksi Masuk", val: txns.filter(t => t.type === "masuk").length, desc: "Entri pendapatan", good: true },
                   { lbl: "Rata-rata per Transaksi", val: txns.length > 0 ? fmtS(Math.round((totalMasuk + totalKeluar) / txns.length)) : "—", desc: "Nilai rata-rata dari total", good: true },
                 ].map((r, i) => (
-                  <div key={i} style={{ background: r.good ? "#FAF9F6" : "#F0EEE4", border: `1px solid ${r.good ? '#E8E6DB' : '#F0EEE4'}`, borderRadius: 24, padding: "14px 16px" }}>
-                    <div style={{ fontSize: 12, color: "#A5A58D", marginBottom: 6 }}>{r.lbl}</div>
-                    <div style={{ fontSize: 20, fontWeight: 700, color: r.good ? "#6B705C" : "#B18B5E", letterSpacing: '-0.5px' }}>{r.val}</div>
-                    <div style={{ fontSize: 11, color: r.good ? "#6B705C" : "#B18B5E", marginTop: 6, fontWeight: 500 }}>{r.desc}</div>
+                  <div key={i} className={`rounded-[24px] p-3.5 md:p-4 border ${r.good ? "bg-[#FAF9F6] border-[#E8E6DB]" : "bg-[#F0EEE4] border-[#F0EEE4]"}`}>
+                    <div className="text-[11px] md:text-[12px] text-[#A5A58D] mb-1.5">{r.lbl}</div>
+                    <div className={`text-[18px] md:text-[20px] font-bold tracking-[-0.5px] ${r.good ? "text-[#6B705C]" : "text-[#B18B5E]"}`}>{r.val}</div>
+                    <div className={`text-[10px] md:text-[11px] mt-1.5 font-medium ${r.good ? "text-[#6B705C]" : "text-[#B18B5E]"}`}>{r.desc}</div>
                   </div>
                 ))}
               </div>
             </div>
           </>
         )}
+
         {/* ══════════════════════════════ AI ASISTEN ══════════════════════════════ */}
         {tab === "asisten" && (
-          <div style={{ ...c.card, maxWidth: '600px', margin: '40px auto 0', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 160px)' }}>
-            <div>
-              <div style={{ ...c.sTitle, marginBottom: 4 }}>💬 AI Asisten: My Akuntansi</div>
-              <div style={{ fontSize: 13, color: '#A5A58D', marginBottom: 20 }}>Tanyakan informasi seputar kas, laba, pemasukan, atau pengeluaran Anda. Historis percakapan disimpan untuk referensi Anda.</div>
+          <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm mx-auto w-full md:max-w-[700px] flex flex-col h-[75vh] md:h-[calc(100vh-180px)] mt-4">
+            <div className="mb-4">
+              <div className="text-sm md:text-base font-semibold mb-1 text-[#4A4A40]">💬 AI Asisten: My Akuntansi</div>
+              <div className="text-[12px] md:text-[13px] text-[#A5A58D]">Tanyakan informasi seputar kas, laba, pemasukan, atau pengeluaran Anda. Historis percakapan disimpan untuk referensi Anda.</div>
             </div>
             
-            <div style={{ flex: 1, overflowY: 'auto', padding: '16px', border: '1px solid #DCD9CC', background: '#efeae2', borderRadius: 12, marginBottom: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="flex-1 overflow-y-auto p-3 md:p-4 border border-[#DCD9CC] bg-[#efeae2] rounded-xl mb-4 flex flex-col gap-2 relative">
               {aiChatHistory.length === 0 ? (
-                <div style={{ margin: 'auto', background: 'rgba(255,255,255,0.7)', padding: '6px 12px', borderRadius: 12, color: '#554', fontSize: 13, textAlign: 'center' }}>
+                <div className="mx-auto mt-4 bg-white/70 px-3 py-1.5 rounded-xl text-[#554] text-[12px] md:text-[13px] text-center">
                   Belum ada percakapan. Silakan mulai bertanya...
                 </div>
               ) : (
                 aiChatHistory.map(msg => (
-                  <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start', marginBottom: 4 }}>
-                    <div style={{ 
-                      maxWidth: '85%', 
-                      padding: '8px 12px 24px 12px',
-                      position: 'relative',
-                      borderRadius: 8, 
-                      borderTopRightRadius: msg.role === 'user' ? 0 : 8,
-                      borderTopLeftRadius: msg.role === 'ai' ? 0 : 8,
-                      background: msg.role === 'user' ? '#d9fdd3' : '#ffffff', 
-                      color: '#111b21',
-                      fontSize: 14.5,
-                      lineHeight: 1.4,
-                      boxShadow: '0 1px 0.5px rgba(11,20,26,.13)',
-                      whiteSpace: 'pre-wrap'
-                    }}>
-                      <div style={{ marginBottom: 0 }}>{msg.content}</div>
-                      <div style={{ position: 'absolute', bottom: 4, right: 8, fontSize: 11, color: '#667781', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <div key={msg.id} className={`flex flex-col mb-1 ${msg.role === 'user' ? "items-end" : "items-start"}`}>
+                    <div className={`max-w-[90%] md:max-w-[85%] px-3 py-2 pb-6 relative rounded-lg text-[13px] md:text-[14px] leading-relaxed shadow-[0_1px_0.5px_rgba(11,20,26,.13)] whitespace-pre-wrap ${msg.role === 'user' ? "rounded-tr-none bg-[#d9fdd3] text-[#111b21]" : "rounded-tl-none bg-white text-[#111b21]"}`}>
+                      <div className="mb-0">{msg.content}</div>
+                      <div className="absolute bottom-1 right-2 text-[10px] md:text-[11px] text-[#667781] flex items-center gap-1">
                         {msg.timestamp.split(' · ')[1] || msg.timestamp}
-                        {msg.role === 'user' && <span style={{ color: '#53bdeb' }}>✓✓</span>}
+                        {msg.role === 'user' && <span className="text-[#53bdeb] font-semibold leading-none">✓✓</span>}
                       </div>
                     </div>
                   </div>
                 ))
               )}
               {isAiLoading && (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', marginBottom: 4 }}>
-                  <div style={{ 
-                    padding: '8px 16px', 
-                    borderRadius: 8, 
-                    borderTopLeftRadius: 0, 
-                    background: '#ffffff', 
-                    fontSize: 14,
-                    boxShadow: '0 1px 0.5px rgba(11,20,26,.13)'
-                  }}>
-                    <em style={{ color: '#8696a0' }}>Mengetik...</em>
+                <div className="flex flex-col items-start mb-1">
+                  <div className="px-4 py-2 rounded-lg rounded-tl-none bg-white text-[13px] shadow-[0_1px_0.5px_rgba(11,20,26,.13)]">
+                    <em className="text-[#8696a0]">Mengetik...</em>
                   </div>
                 </div>
               )}
             </div>
 
-            <div style={{ display: 'flex', gap: 12 }}>
+            <div className="flex gap-2.5">
               <input 
                 type="text" 
                 value={aiPrompt}
                 onChange={e => setAiPrompt(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleAskAI()}
                 placeholder="Ketik pertanyaan di sini (cth: Berapa laba bulan ini?)" 
-                style={{ ...c.input, flex: 1, padding: "12px 14px", fontSize: 14 }}
+                className="flex-1 p-2.5 px-3.5 rounded-lg border border-[#DCD9CC] bg-white text-[#4A4A40] text-[13px] box-border outline-none focus:border-[#6B705C]"
               />
               <button 
                 onClick={handleAskAI}
                 disabled={isAiLoading || aiPrompt.trim() === ""}
-                style={{
-                  padding: '0 20px',
-                  borderRadius: 8,
-                  border: 'none',
-                  backgroundColor: isAiLoading || aiPrompt.trim() === "" ? '#C8C4B7' : '#367609',
-                  color: '#fff',
-                  fontWeight: 600,
-                  fontSize: 14,
-                  cursor: isAiLoading || aiPrompt.trim() === "" ? 'not-allowed' : 'pointer',
-                  transition: 'background-color 0.2s',
-                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-                }}
+                className="px-4 md:px-5 py-2.5 rounded-lg border-none text-white font-semibold text-[13px] md:text-[14px] cursor-pointer shadow-sm transition-colors disabled:bg-[#C8C4B7] disabled:cursor-not-allowed bg-[#367609] hover:bg-[#2e6408]"
               >
                 Tanya
               </button>
@@ -812,14 +930,14 @@ export default function App() {
 
       {/* Modal Konfirmasi Hapus */}
       {deleteId && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div style={{ background: '#fff', padding: 24, borderRadius: 12, width: 320, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-            <h3 style={{ marginTop: 0, color: '#4A4A40', fontSize: 16 }}>Hapus Transaksi</h3>
-            <p style={{ color: '#A5A58D', fontSize: 13, lineHeight: 1.5 }}>Apakah Anda yakin ingin menghapus transaksi ini? Tindakan ini tidak dapat dibatalkan.</p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24 }}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-5 md:p-6 rounded-xl w-full max-w-[320px] shadow-xl">
+            <h3 className="mt-0 mb-2 text-[#4A4A40] text-base md:text-lg font-semibold">Hapus Transaksi</h3>
+            <p className="text-[#A5A58D] text-[12px] md:text-[13px] leading-relaxed m-0">Apakah Anda yakin ingin menghapus transaksi ini? Tindakan ini tidak dapat dibatalkan.</p>
+            <div className="flex justify-end gap-2 mt-5 md:mt-6">
               <button 
                 onClick={() => setDeleteId(null)} 
-                style={{ padding: '8px 16px', border: '1px solid #DCD9CC', background: '#fff', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 500, color: '#4A4A40' }}>
+                className="py-2 px-4 border border-[#DCD9CC] bg-white rounded-lg cursor-pointer text-[12px] md:text-[13px] font-medium text-[#4A4A40] hover:bg-gray-50">
                 Batal
               </button>
               <button 
@@ -829,7 +947,7 @@ export default function App() {
                   setMsg({ ok: true, text: "Transaksi berhasil dihapus." });
                   setTimeout(() => setMsg(null), 3000);
                 }} 
-                style={{ padding: '8px 16px', border: 'none', background: '#B18B5E', color: '#fff', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 500 }}>
+                className="py-2 px-4 border-none bg-[#B18B5E] text-white rounded-lg cursor-pointer text-[12px] md:text-[13px] font-medium hover:bg-[#a07c52]">
                 Hapus
               </button>
             </div>

@@ -24,6 +24,23 @@ export interface Transaction {
   saldo?: number;
 }
 
+export interface Debt {
+  id: number;
+  type: "hutang" | "piutang";
+  name: string;
+  amount: number;
+  dueDate: string;
+  status: "lunas" | "belum";
+}
+
+export interface Inventory {
+  id: number;
+  name: string;
+  qty: number;
+  price: number;
+  cogs: number;
+}
+
 const CAT_MASUK = ["Penjualan Produk", "Jasa / Layanan", "Investasi Masuk", "Pinjaman", "Pendapatan Lain"];
 const CAT_KELUAR = ["Bahan Baku", "Gaji Karyawan", "Operasional", "Marketing & Iklan", "Utilitas", "Pajak & Admin", "Pengeluaran Lain"];
 
@@ -43,7 +60,9 @@ const INIT_TXNS: Transaction[] = [
 
 const TABS = [
   { id:"dashboard", label:"Dashboard", icon:"📊" },
-  { id:"transaksi", label:"Transaksi", icon:"💳" },
+  { id:"transaksi", label:"Kas", icon:"💳" },
+  { id:"hutang_piutang", label:"Hutang Piutang", icon:"🤝" },
+  { id:"inventori", label:"Stok", icon:"📦" },
   { id:"laporan", label:"Laporan", icon:"📋" },
   { id:"asisten", label:"AI Asisten", icon:"🤖" },
 ];
@@ -58,9 +77,15 @@ export default function App() {
       return false;
     }
   });
-  
+
   const [showLoginConfirm, setShowLoginConfirm] = useState(false);
   const [loginType, setLoginType] = useState<"individu" | "workspace" | null>(null);
+  
+  const [authMode, setAuthMode] = useState<"options" | "login" | "register">("options");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authName, setAuthName] = useState("");
+  const [registeredUsers, setRegisteredUsers] = useState([{ email: "nayarakaira31@gmail.com", name: "Nayara Kaira" }]);
 
   useEffect(() => {
     const timer = setTimeout(() => setShowSplash(false), 2000);
@@ -83,11 +108,39 @@ export default function App() {
     return INIT_TXNS;
   });
 
+  const [debts, setDebts] = useState<Debt[]>(() => {
+    try {
+      const saved = localStorage.getItem("myAkuntansi_debts");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
+
+  const [inventory, setInventory] = useState<Inventory[]>(() => {
+    try {
+      const saved = localStorage.getItem("myAkuntansi_inventory");
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
+
   useEffect(() => {
     try {
       localStorage.setItem("myAkuntansi_txns", JSON.stringify(txns));
     } catch {}
   }, [txns]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("myAkuntansi_debts", JSON.stringify(debts));
+    } catch {}
+  }, [debts]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("myAkuntansi_inventory", JSON.stringify(inventory));
+    } catch {}
+  }, [inventory]);
 
   const [form, setForm] = useState({
     date: new Date().toISOString().slice(0, 10), desc: "", cat: "", type: "masuk", amount: ""
@@ -95,12 +148,20 @@ export default function App() {
   const [filterType, setFilterType] = useState("semua");
   const [filterMonth, setFilterMonth] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean, text: string } | null>(null);
-  const [deleteId, setDeleteId] = useState<number | null>(null);
-  const [editId, setEditId] = useState<number | null>(null);
-  
+  const [deleteId, setDeleteId] = useState<number | string | null>(null);
+  const [editId, setEditId] = useState<number | string | null>(null);
+
+  const [editDebtId, setEditDebtId] = useState<number | null>(null);
+  const [editDebtForm, setEditDebtForm] = useState<Partial<Debt>>({});
+
+  const [editInvId, setEditInvId] = useState<number | null>(null);
+  const [editInvForm, setEditInvForm] = useState<Partial<Inventory>>({});
+
+  const [laporanTab, setLaporanTab] = useState<"lr" | "neraca" | "gl" | "pajak">("lr");
+
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 15;
-  
+
   // Reset page when filter changes
   useEffect(() => {
     setCurrentPage(1);
@@ -165,7 +226,7 @@ export default function App() {
     if (filterType !== "semua") {
       finalList = finalList.filter(t => t.type === filterType);
     }
-    
+
     // 4. Return secara descending agar transaksi terbaru ada di paling atas
     return finalList.reverse();
   }, [txns, filterMonth, filterType]);
@@ -195,7 +256,7 @@ export default function App() {
       saldoAkhir: _saldoAwal + _masuk - _keluar 
     };
   }, [txns, filterMonth]);
-  
+
   const laba = totalMasuk - totalKeluar;
   const margin = totalMasuk > 0 ? ((laba / totalMasuk) * 100).toFixed(1) : "0";
 
@@ -227,9 +288,9 @@ export default function App() {
       setTimeout(() => setMsg(null), 3000);
       return;
     }
-    const headers = ["ID", "Tanggal", "Kategori", "Deskripsi", "Jenis", "Nominal"];
+    const headers = ["ID", "Tanggal", "Kategori", "Deskripsi", "Jenis", "Nominal", "Saldo"];
     const rows = filteredTxns.map(t => [
-      t.id, t.date, `"${t.cat}"`, `"${t.desc.replace(/"/g, '""')}"`, t.type, t.amount
+      t.id, t.date, `"${t.cat}"`, `"${t.desc.replace(/"/g, '""')}"`, t.type, t.amount, t.saldo ?? ""
     ]);
     const csvContent = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -244,11 +305,11 @@ export default function App() {
 
   const handleAskAI = async () => {
     if (aiPrompt.trim() === "") return;
-    
+
     setIsAiLoading(true);
     const now = new Date();
     const timestamp = now.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + " · " + now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-    
+
     const promptText = aiPrompt;
     const userMsg = { id: crypto.randomUUID(), timestamp, role: 'user' as const, content: promptText };
     setAiChatHistory(prev => [...prev, userMsg]);
@@ -262,6 +323,9 @@ export default function App() {
         cat: t.cat
       }));
 
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds timeout
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -269,19 +333,22 @@ export default function App() {
           prompt: promptText,
           txns: summaryTxns,
           mode: 'asisten_tab'
-        })
+        }),
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error("Gagal menghubungi AI");
       }
 
       const parsed = await response.json();
-      
+
       const aiNow = new Date();
       const aiTimestamp = aiNow.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }) + " · " + aiNow.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
       const aiMsg = { id: crypto.randomUUID(), timestamp: aiTimestamp, role: 'ai' as const, content: parsed.reply };
-      
+
       setAiChatHistory(prev => [...prev, aiMsg]);
     } catch (e: unknown) {
       const errorMsg = e instanceof Error ? e.message : String(e);
@@ -376,7 +443,7 @@ export default function App() {
           >
             📊
           </motion.div>
-          
+
           <motion.h1 
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -385,7 +452,7 @@ export default function App() {
           >
             myAkuntansi
           </motion.h1>
-          
+
           <motion.p
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -402,10 +469,13 @@ export default function App() {
   const cats = form.type === "masuk" ? CAT_MASUK : CAT_KELUAR;
 
   const CustomTip = ({ active, payload, label }: { active?: boolean, payload?: any[], label?: string }) => {
-    if (!active || !payload?.length) return null;
+    if (!active || !payload?.length || !label) return null;
+    const tLabel = label || "";
+    const isDate = /^\d{4}-\d{2}-\d{2}$/.test(tLabel);
+    const formattedLabel = isDate ? new Date(tLabel).toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' }) : tLabel;
     return (
       <div className="bg-white border border-[#DCD9CC] rounded-[8px] px-3.5 py-2.5 text-xs shadow-sm">
-        <p className="m-0 mb-1.5 font-medium text-[#4A4A40]">{label}</p>
+        <p className="m-0 mb-1.5 font-medium text-[#4A4A40]">{formattedLabel}</p>
         {payload.map((p: { color: string; name: string; value: number }, i: number) => (
           <p key={i} className="m-0 my-0.5" style={{ color: p.color }}>{p.name}: {fmtS(p.value)}</p>
         ))}
@@ -428,31 +498,171 @@ export default function App() {
 
         <div className="bg-white border border-[#DCD9CC] rounded-[24px] w-full max-w-sm p-6 md:p-8 shadow-sm text-center relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#007a07] to-[#B18B5E]"></div>
-          
-          <h2 className="text-lg font-semibold text-[#4A4A40] mb-6">Masuk ke Akun Anda</h2>
-          
-          <div className="flex flex-col gap-3">
-            <button 
-              onClick={() => { setLoginType("individu"); setShowLoginConfirm(true); }}
-              className="w-full bg-white border border-[#DCD9CC] text-[#4A4A40] font-medium py-3 md:py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm group"
-            >
-              <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform"/>
-              <span className="text-[13px] md:text-sm">Lanjutkan dengan Google (Individu)</span>
-            </button>
 
-            <button 
-              onClick={() => { setLoginType("workspace"); setShowLoginConfirm(true); }}
-              className="w-full bg-white border border-[#DCD9CC] text-[#4A4A40] font-medium py-3 md:py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm group"
-            >
-              <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform grayscale opacity-80 group-hover:grayscale-0 group-hover:opacity-100"/>
-              <span className="text-[13px] md:text-sm">Lanjutkan dengan Google Workspace</span>
-            </button>
-          </div>
+          {authMode === "options" && (
+            <>
+              <h2 className="text-lg font-semibold text-[#4A4A40] mb-6">Masuk ke Akun Anda</h2>
 
-          <div className="mt-8 text-[11px] md:text-[12px] text-[#A5A58D]">
-            Dengan melanjutkan, Anda menyetujui <br/>
-            <a href="#" className="text-[#6B705C] hover:underline">Syarat Ketentuan</a> dan <a href="#" className="text-[#6B705C] hover:underline">Kebijakan Privasi</a> kami.
-          </div>
+              <div className="flex flex-col gap-3">
+                <button 
+                  onClick={() => { setLoginType("individu"); setShowLoginConfirm(true); }}
+                  className="w-full bg-white border border-[#DCD9CC] text-[#4A4A40] font-medium py-3 md:py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm group"
+                >
+                  <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform"/>
+                  <span className="text-[13px] md:text-sm">Lanjutkan dengan Google (Individu)</span>
+                </button>
+
+                <button 
+                  onClick={() => { setLoginType("workspace"); setShowLoginConfirm(true); }}
+                  className="w-full bg-white border border-[#DCD9CC] text-[#4A4A40] font-medium py-3 md:py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm group"
+                >
+                  <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform grayscale opacity-80 group-hover:grayscale-0 group-hover:opacity-100"/>
+                  <span className="text-[13px] md:text-sm">Lanjutkan dengan Google Workspace</span>
+                </button>
+                
+                <div className="flex items-center gap-4 my-2">
+                  <div className="flex-1 h-px bg-[#DCD9CC]"></div>
+                  <div className="text-[11px] text-[#A5A58D] font-medium uppercase">Atau</div>
+                  <div className="flex-1 h-px bg-[#DCD9CC]"></div>
+                </div>
+
+                <button 
+                  onClick={() => setAuthMode("login")}
+                  className="w-full bg-[#007a07] text-white font-medium py-3 md:py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-[#006606] transition-all shadow-sm group"
+                >
+                  <span className="text-[13px] md:text-sm">Masuk dengan Email</span>
+                </button>
+                
+                <div className="mt-2 text-[13px] text-[#4A4A40]">
+                  Belum punya akun? <button onClick={() => setAuthMode("register")} className="text-[#007a07] font-semibold hover:underline">Daftar sekarang</button>
+                </div>
+              </div>
+
+              <div className="mt-8 text-[11px] md:text-[12px] text-[#A5A58D]">
+                Dengan melanjutkan, Anda menyetujui <br/>
+                <span className="text-[#6B705C] hover:underline cursor-pointer">Syarat Ketentuan</span> dan <span className="text-[#6B705C] hover:underline cursor-pointer">Kebijakan Privasi</span> kami.
+              </div>
+            </>
+          )}
+
+          {authMode === "login" && (
+            <div className="text-left">
+              <button 
+                onClick={() => setAuthMode("options")}
+                className="text-[#6B705C] hover:text-[#4A4A40] flex items-center gap-1 text-[13px] font-medium mb-4"
+              >
+                ← Kembali
+              </button>
+              <h2 className="text-lg font-semibold text-[#4A4A40] mb-6">Masuk dengan Email</h2>
+              
+              <div className="flex flex-col gap-4">
+                <div>
+                  <label className="block text-[12px] font-semibold text-[#4A4A40] mb-1.5">Email</label>
+                  <input 
+                    type="email" 
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    className="w-full p-3 rounded-xl border border-[#DCD9CC] bg-white text-[#4A4A40] text-[13px] focus:outline-none focus:border-[#007a07]"
+                    placeholder="nama@email.com"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[12px] font-semibold text-[#4A4A40] mb-1.5">Kata Sandi</label>
+                  <input 
+                    type="password" 
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    className="w-full p-3 rounded-xl border border-[#DCD9CC] bg-white text-[#4A4A40] text-[13px] focus:outline-none focus:border-[#007a07]"
+                    placeholder="••••••••"
+                  />
+                </div>
+                <button 
+                  onClick={() => {
+                    const user = registeredUsers.find(u => u.email === authEmail);
+                    if (user) {
+                      setIsLoggedIn(true);
+                    } else {
+                      alert('Akun tidak ditemukan. Silakan daftar terlebih dahulu.');
+                      setAuthMode('register');
+                    }
+                  }}
+                  className="w-full bg-[#007a07] text-white font-semibold py-3 px-4 rounded-xl mt-2 hover:bg-[#006606] transition-colors"
+                >
+                  Masuk Ke Akun
+                </button>
+                <div className="text-center mt-4 text-[13px] text-[#4A4A40]">
+                  Belum punya akun? <button onClick={() => setAuthMode("register")} className="text-[#007a07] font-semibold hover:underline">Daftar sekarang</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {authMode === "register" && (
+            <div className="text-left">
+              <button 
+                onClick={() => setAuthMode("options")}
+                className="text-[#6B705C] hover:text-[#4A4A40] flex items-center gap-1 text-[13px] font-medium mb-4"
+              >
+                ← Kembali
+              </button>
+              <h2 className="text-lg font-semibold text-[#4A4A40] mb-6">Daftar Akun Baru</h2>
+              
+              <div className="flex flex-col gap-4">
+                <div>
+                  <label className="block text-[12px] font-semibold text-[#4A4A40] mb-1.5">Nama Lengkap / Usaha</label>
+                  <input 
+                    type="text" 
+                    value={authName}
+                    onChange={(e) => setAuthName(e.target.value)}
+                    className="w-full p-3 rounded-xl border border-[#DCD9CC] bg-white text-[#4A4A40] text-[13px] focus:outline-none focus:border-[#007a07]"
+                    placeholder="Toko Sejahtera"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[12px] font-semibold text-[#4A4A40] mb-1.5">Email</label>
+                  <input 
+                    type="email" 
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    className="w-full p-3 rounded-xl border border-[#DCD9CC] bg-white text-[#4A4A40] text-[13px] focus:outline-none focus:border-[#007a07]"
+                    placeholder="nama@email.com"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[12px] font-semibold text-[#4A4A40] mb-1.5">Kata Sandi</label>
+                  <input 
+                    type="password" 
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    className="w-full p-3 rounded-xl border border-[#DCD9CC] bg-white text-[#4A4A40] text-[13px] focus:outline-none focus:border-[#007a07]"
+                    placeholder="••••••••"
+                  />
+                </div>
+                <button 
+                  onClick={() => {
+                    if (!authEmail || !authPassword || !authName) {
+                      alert('Harap lengkapi semua data.');
+                      return;
+                    }
+                    if (registeredUsers.some(u => u.email === authEmail)) {
+                      alert('Akun sudah terdaftar. Silakan masuk.');
+                      setAuthMode('login');
+                      return;
+                    }
+                    setRegisteredUsers([...registeredUsers, { email: authEmail, name: authName }]);
+                    alert('Akun berhasil didaftar. Silakan masuk.');
+                    setAuthMode("login");
+                  }}
+                  className="w-full bg-[#007a07] text-white font-semibold py-3 px-4 rounded-xl mt-2 hover:bg-[#006606] transition-colors"
+                >
+                  Daftar Akun
+                </button>
+                <div className="text-center mt-4 text-[13px] text-[#4A4A40]">
+                  Sudah punya akun? <button onClick={() => setAuthMode("login")} className="text-[#007a07] font-semibold hover:underline">Masuk di sini</button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Konfirmasi Login Modal */}
           {showLoginConfirm && (
@@ -465,25 +675,46 @@ export default function App() {
                 <div className="w-12 h-12 bg-[#E8E6DB] rounded-full flex items-center justify-center mb-4">
                   <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" className="w-6 h-6"/>
                 </div>
-                <h3 className="text-[#4A4A40] text-lg font-bold mb-2">Konfirmasi Akun</h3>
-                <p className="text-[13px] text-[#A5A58D] mb-6 leading-relaxed">
-                  Anda akan masuk menggunakan akun Google {loginType === "workspace" ? "Workspace" : "Individu"}. Apakah Anda ingin melanjutkan?
+                <h3 className="text-[#4A4A40] text-lg font-bold mb-1">Pilih Akun</h3>
+                <p className="text-[13px] text-[#A5A58D] mb-4 leading-relaxed">
+                  Pilih akun Google untuk melanjutkan ke myAkuntansi.
                 </p>
-                <div className="flex gap-3 mt-2">
+                <div className="flex flex-col gap-2 mt-2">
+                  {[
+                    { email: "nayarakaira31@gmail.com", name: "Nayara Kaira", avatar: "NK" },
+                    { email: "usaha.anda@gmail.com", name: "Akun Bisnis Baru", avatar: "AB" }
+                  ].map(acc => (
+                    <button 
+                      key={acc.email}
+                      onClick={() => {
+                        const user = registeredUsers.find(u => u.email === acc.email);
+                        if (user) {
+                          setShowLoginConfirm(false);
+                          setIsLoggedIn(true);
+                        } else {
+                          setShowLoginConfirm(false);
+                          alert('Akun Google ini belum terdaftar. Silakan daftar terlebih dahulu.');
+                          setAuthEmail(acc.email);
+                          setAuthName(acc.name);
+                          setAuthMode('register');
+                        }
+                      }}
+                      className="w-full flex items-center gap-3 p-3 border border-[#DCD9CC] rounded-xl hover:bg-[#FAF9F6] hover:border-[#A5A58D] transition-colors text-left group"
+                    >
+                      <div className="w-9 h-9 rounded-full bg-[#007a07] text-white flex items-center justify-center text-[11px] font-bold shrink-0 shadow-sm border border-[#006606]">
+                        {acc.avatar}
+                      </div>
+                      <div className="flex-1 overflow-hidden">
+                        <div className="text-[13px] font-semibold text-[#4A4A40] truncate group-hover:text-[#007a07] transition-colors">{acc.name}</div>
+                        <div className="text-[11px] text-[#8A8F78] truncate">{acc.email}</div>
+                      </div>
+                    </button>
+                  ))}
                   <button 
                     onClick={() => setShowLoginConfirm(false)}
-                    className="flex-1 py-2.5 px-4 border border-[#DCD9CC] bg-white rounded-xl text-[13px] font-semibold text-[#4A4A40] hover:bg-gray-50 transition-colors"
+                    className="w-full mt-3 py-2.5 px-4 bg-white border border-[#DCD9CC] rounded-xl text-[13px] font-semibold text-[#6B705C] hover:bg-gray-50 transition-colors"
                   >
                     Batal
-                  </button>
-                  <button 
-                    onClick={() => {
-                      setShowLoginConfirm(false);
-                      setIsLoggedIn(true);
-                    }}
-                    className="flex-1 py-2.5 px-4 bg-[#367609] hover:bg-[#2e6408] rounded-xl text-white font-semibold text-[13px] shadow-md transition-colors border border-transparent"
-                  >
-                    Ya, Lanjutkan
                   </button>
                 </div>
               </motion.div>
@@ -524,10 +755,6 @@ export default function App() {
             )}
           </div>
           <div className="flex gap-4 items-center shrink-0">
-            <div className="flex gap-2 items-center">
-              <div className="w-2 h-2 rounded-full bg-white shadow-[0_0_0_2px_rgba(255,255,255,0.3)]"></div>
-              <span className="text-[11px] text-white font-medium opacity-90">Live</span>
-            </div>
             <button 
               onClick={() => setIsLoggedIn(false)}
               className="text-white/80 hover:text-white bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors border border-white/20"
@@ -582,11 +809,11 @@ export default function App() {
                 ))}
               </div>
               <div className="h-[180px] md:h-[210px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={10} minHeight={10}>
                   <LineChart data={dailyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#DCD9CC" vertical={false} />
-                    <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#A5A58D' }} tickLine={false} axisLine={false} />
-                    <YAxis tickFormatter={v => `${(v/1000000).toFixed(1)}jt`} tick={{ fontSize: 11, fill: '#A5A58D' }} tickLine={false} axisLine={false} />
+                    <XAxis dataKey="dateFull" tickFormatter={(v) => v.slice(8)} tick={{ fontSize: 11, fill: '#A5A58D' }} tickLine={false} axisLine={false} />
+                    <YAxis tickFormatter={v => fmtS(v).replace('Rp ', '')} tick={{ fontSize: 11, fill: '#A5A58D' }} tickLine={false} axisLine={false} />
                     <Tooltip content={<CustomTip />} />
                     <Line type="monotone" dataKey="masuk" name="Pemasukan" stroke="#6B705C" strokeWidth={2} dot={{ r: 3, fill:"#6B705C" }} activeDot={{ r: 5 }} />
                     <Line type="monotone" dataKey="keluar" name="Pengeluaran" stroke="#B18B5E" strokeWidth={2} strokeDasharray="5 3" dot={{ r: 3, fill:"#B18B5E" }} activeDot={{ r: 5 }} />
@@ -602,7 +829,7 @@ export default function App() {
                 <div className="text-sm md:text-base font-semibold mb-3 text-[#4A4A40]">Breakdown Pengeluaran</div>
                 <div className="flex items-center flex-col sm:flex-row gap-4 sm:gap-0">
                   <div className="w-[140px] h-[140px] md:w-[160px] md:h-[160px] shrink-0">
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={10} minHeight={10}>
                       <PieChart>
                         <Pie data={pieKeluar} cx="50%" cy="50%" innerRadius={42} outerRadius={68} dataKey="value" nameKey="name" paddingAngle={2}>
                           {pieKeluar.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
@@ -627,10 +854,10 @@ export default function App() {
               <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm">
                 <div className="text-sm md:text-base font-semibold mb-3 text-[#4A4A40]">Sumber Pemasukan</div>
                 <div className="h-[180px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={10} minHeight={10}>
                     <BarChart data={pieMasuk} layout="vertical" margin={{ left: -10, right: 16, top: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#DCD9CC" horizontal={false} />
-                      <XAxis type="number" tickFormatter={v => `${(v/1000000).toFixed(1)}jt`} tick={{ fontSize: 10, fill: '#A5A58D' }} axisLine={false} tickLine={false} />
+                      <XAxis type="number" tickFormatter={v => fmtS(v).replace('Rp ', '')} tick={{ fontSize: 10, fill: '#A5A58D' }} axisLine={false} tickLine={false} />
                       <YAxis type="category" dataKey="name" tick={{ fontSize: 10, fill: '#4A4A40' }} width={90} axisLine={false} tickLine={false} />
                       <Tooltip content={<CustomTip />} cursor={{fill: '#DCD9CC'}} />
                       <Bar dataKey="value" name="Jumlah" fill="#6B705C" radius={[0, 4, 4, 0]} barSize={16} />
@@ -653,7 +880,7 @@ export default function App() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="text-[12px] md:text-[13px] font-medium truncate text-[#4A4A40]">{t.desc}</div>
-                      <div className="text-[10px] md:text-[11px] text-[#A5A58D] mt-0.5">{t.date} • {t.cat}</div>
+                      <div className="text-[10px] md:text-[11px] text-[#A5A58D] mt-0.5">{new Date(t.date).toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })} • {t.cat}</div>
                     </div>
                     <div className="flex items-center gap-2 md:gap-3">
                       <div className={`font-semibold text-[12px] md:text-[13px] ${t.type === "masuk" ? "text-[#6B705C]" : "text-[#B18B5E]"}`}>
@@ -706,7 +933,7 @@ export default function App() {
 
               {/* Fields */}
               {[
-                { label: "Tanggal", el: <input type="date" className="w-full p-2.5 rounded-lg border-[0.5px] border-[#DCD9CC] bg-white text-[#4A4A40] text-[13px] box-border" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /> },
+                { label: "Tanggal & Hari", el: <div className="flex gap-2"><input type="date" className="w-full p-2.5 rounded-lg border-[0.5px] border-[#DCD9CC] bg-white text-[#4A4A40] text-[13px] box-border" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /><div className="p-2.5 border border-transparent text-[#6B705C] text-[13px] font-semibold flex items-center">{form.date ? new Date(form.date).toLocaleDateString('id-ID', { weekday: 'long' }) : ""}</div></div> },
                 { label: "Deskripsi", el: <input type="text" className="w-full p-2.5 rounded-lg border-[0.5px] border-[#DCD9CC] bg-white text-[#4A4A40] text-[13px] box-border" placeholder="Keterangan singkat..." value={form.desc} onChange={e => setForm(f => ({ ...f, desc: e.target.value }))} /> },
                 { label: "Kategori", el: (
                   <select className="w-full p-2.5 rounded-lg border-[0.5px] border-[#DCD9CC] bg-white text-[#4A4A40] text-[13px] box-border" value={form.cat} onChange={e => setForm(f => ({ ...f, cat: e.target.value }))}>
@@ -797,7 +1024,7 @@ export default function App() {
                     ) : (
                       filteredTxns.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((t, index) => (
                         <tr key={t.id} className={`border-b border-[#E8E6DB] ${index % 2 === 0 ? 'bg-white' : 'bg-[#FAF9F6]'} hover:bg-gray-50`}>
-                          <td className="py-3 px-3 md:px-4 text-[#4A4A40]">{new Date(t.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                          <td className="py-3 px-3 md:px-4 text-[#4A4A40]">{new Date(t.date).toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}</td>
                           <td className="py-3 px-3 md:px-4">
                             <div className="font-medium text-[#4A4A40] w-32 sm:w-auto truncate md:whitespace-normal xl:line-clamp-2">{t.desc}</div>
                             <div className="text-[11px] text-[#A5A58D] mt-1">{t.cat}</div>
@@ -812,7 +1039,7 @@ export default function App() {
                             <button onClick={() => startEdit(t)} className="bg-transparent border-none cursor-pointer text-[#6B705C] px-1 md:px-2 py-1 rounded hover:bg-black/5 text-[14px] md:text-[16px]">
                               ✏️
                             </button>
-                            <button onClick={() => setDeleteId(t.id as number)} className="bg-transparent border-none cursor-pointer text-[#B18B5E] px-1 md:px-2 py-1 rounded hover:bg-black/5 text-[14px] md:text-[16px]">
+                            <button onClick={() => setDeleteId(t.id)} className="bg-transparent border-none cursor-pointer text-[#B18B5E] px-1 md:px-2 py-1 rounded hover:bg-black/5 text-[14px] md:text-[16px]">
                               🗑️
                             </button>
                           </td>
@@ -827,7 +1054,7 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
-              
+
               {/* Pagination Controls */}
               {Math.ceil(filteredTxns.length / itemsPerPage) > 1 && (
                 <div className="flex items-center justify-between mt-4 pt-4 border-t border-[#DCD9CC]">
@@ -856,11 +1083,233 @@ export default function App() {
           </div>
         )}
 
+        {/* ══════════════════════════════ HUTANG PIUTANG ══════════════════════════════ */}
+        {tab === "hutang_piutang" && (
+          <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm">
+            <div className="text-base font-semibold mb-4 text-[#4A4A40]">Manajemen Hutang & Piutang</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div className="border border-[#DCD9CC] bg-[#FAF9F6] p-4 rounded-xl">
+                <div className="text-[12px] font-bold text-[#A5A58D] mb-1">TOTAL PIUTANG (A/R) - BELUM LUNAS</div>
+                <div className="text-[20px] font-bold text-[#4A4A40]">{fmt(debts.filter(d => d.type === 'piutang' && d.status === 'belum').reduce((a,b)=>a+b.amount,0))}</div>
+              </div>
+              <div className="border border-[#DCD9CC] bg-[#FAF9F6] p-4 rounded-xl">
+                <div className="text-[12px] font-bold text-[#A5A58D] mb-1">TOTAL HUTANG (A/P) - BELUM LUNAS</div>
+                <div className="text-[20px] font-bold text-[#B18B5E]">{fmt(debts.filter(d => d.type === 'hutang' && d.status === 'belum').reduce((a,b)=>a+b.amount,0))}</div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-[#DCD9CC]">
+              <table className="w-full text-left border-collapse min-w-[600px]">
+                <thead>
+                  <tr className="bg-[#E8E6DB]">
+                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Nama / Pihak</th>
+                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Jenis</th>
+                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Jatuh Tempo</th>
+                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Nominal</th>
+                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Status</th>
+                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white">
+                  {debts.map(d => (
+                    <tr key={d.id} className="border-b border-[#DCD9CC] last:border-0 hover:bg-[#FAF9F6] transition-colors">
+                      <td className="p-3 text-[13px] text-[#4A4A40] font-medium">
+                        {editDebtId === d.id ? (
+                          <input type="text" className="w-full border border-[#DCD9CC] p-1 rounded text-[12px]" value={editDebtForm.name || ""} onChange={e => setEditDebtForm({ ...editDebtForm, name: e.target.value })} />
+                        ) : d.name}
+                      </td>
+                      <td className="p-3 text-[13px]">
+                        {editDebtId === d.id ? (
+                          <select className="border border-[#DCD9CC] p-1 rounded text-[12px]" value={editDebtForm.type || "hutang"} onChange={e => setEditDebtForm({ ...editDebtForm, type: e.target.value as "hutang" | "piutang" })}>
+                            <option value="piutang">PIUTANG</option>
+                            <option value="hutang">HUTANG</option>
+                          </select>
+                        ) : (
+                          <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${d.type === 'piutang' ? 'bg-[#e2eadc] text-[#367609]' : 'bg-[#faebd7] text-[#B18B5E]'}`}>
+                            {d.type.toUpperCase()}
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3 text-[13px] text-[#A5A58D]">
+                        {editDebtId === d.id ? (
+                          <input type="date" className="w-full border border-[#DCD9CC] p-1 rounded text-[12px]" value={editDebtForm.dueDate || ""} onChange={e => setEditDebtForm({ ...editDebtForm, dueDate: e.target.value })} />
+                        ) : d.dueDate}
+                      </td>
+                      <td className="p-3 text-[13px] font-semibold text-[#4A4A40]">
+                        {editDebtId === d.id ? (
+                          <input type="number" className="w-full border border-[#DCD9CC] p-1 rounded text-[12px]" value={editDebtForm.amount || 0} onChange={e => setEditDebtForm({ ...editDebtForm, amount: Number(e.target.value) })} />
+                        ) : fmt(d.amount)}
+                      </td>
+                      <td className="p-3 text-[13px]">
+                        {editDebtId === d.id ? (
+                          <select className="border border-[#DCD9CC] p-1 rounded text-[12px]" value={editDebtForm.status || "belum"} onChange={e => setEditDebtForm({ ...editDebtForm, status: e.target.value as "lunas" | "belum" })}>
+                            <option value="belum">Belum Lunas</option>
+                            <option value="lunas">Lunas</option>
+                          </select>
+                        ) : d.status === 'lunas' ? (
+                           <span className="text-[#367609] font-semibold text-[12px]">✓ Lunas</span>
+                        ) : (
+                           <span className="text-[#B18B5E] font-semibold text-[12px]">⏱ Belum Lunas</span>
+                        )}
+                      </td>
+                      <td className="p-3 flex gap-2">
+                        {editDebtId === d.id ? (
+                          <>
+                            <button onClick={() => {
+                              setDebts(debts.map(x => x.id === d.id ? { ...x, ...editDebtForm } as Debt : x));
+                              setEditDebtId(null);
+                            }} className="bg-[#367609] text-white px-2.5 py-1 rounded-md text-[11px] font-bold hover:bg-[#2e6408] transition-colors">Simpan</button>
+                            <button onClick={() => setEditDebtId(null)} className="bg-gray-300 text-[#4A4A40] px-2.5 py-1 rounded-md text-[11px] font-bold hover:bg-gray-400 transition-colors">Batal</button>
+                          </>
+                        ) : (
+                          <>
+                            {d.status === 'belum' && (
+                              <button 
+                                onClick={() => setDebts(debts.map(x => x.id === d.id ? { ...x, status: 'lunas' } : x))}
+                                className="bg-[#367609] text-white px-2.5 py-1 rounded-md text-[11px] font-bold hover:bg-[#2e6408] transition-colors">
+                                Lunas
+                              </button>
+                            )}
+                            <button onClick={() => { setEditDebtId(d.id); setEditDebtForm(d); }} className="text-[#6B705C] bg-[#FAF9F6] border border-[#DCD9CC] px-2.5 py-1 rounded-md text-[11px] font-bold hover:bg-white transition-colors">Edit</button>
+                            <button onClick={() => setDebts(debts.filter(x => x.id !== d.id))} className="text-[#B18B5E] bg-[#FAF9F6] border border-[#DCD9CC] px-2.5 py-1 rounded-md text-[11px] font-bold hover:bg-white transition-colors">Hapus</button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {debts.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="p-6 text-center text-[13px] text-[#A5A58D]">Belum ada catatan hutang/piutang.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            
+            <div className="mt-4 flex gap-2">
+              <button 
+                onClick={() => setDebts([...debts, { id: Date.now(), type: 'piutang', name: 'Pelanggan Baru (Contoh)', amount: 500000, dueDate: new Date().toISOString().slice(0, 10), status: 'belum' }])}
+                className="py-2 px-4 rounded-xl border border-[#DCD9CC] bg-[#FAF9F6] text-[#4A4A40] text-[12px] font-semibold hover:bg-white transition-colors">
+                + Tambah Piutang
+              </button>
+              <button 
+                onClick={() => setDebts([...debts, { id: Date.now()+1, type: 'hutang', name: 'Supplier Baru (Contoh)', amount: 300000, dueDate: new Date().toISOString().slice(0, 10), status: 'belum' }])}
+                className="py-2 px-4 rounded-xl border border-[#DCD9CC] bg-[#FAF9F6] text-[#4A4A40] text-[12px] font-semibold hover:bg-white transition-colors">
+                + Tambah Hutang
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ══════════════════════════════ INVENTORI ══════════════════════════════ */}
+        {tab === "inventori" && (
+          <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm">
+            <div className="text-base font-semibold mb-4 text-[#4A4A40]">Manajemen Stok / Inventori</div>
+            <div className="border border-[#DCD9CC] bg-[#E8E6DB] p-4 rounded-xl mb-6">
+              <div className="text-[12px] font-bold text-[#4A4A40] mb-1">TOTAL NILAI PERSEDIAAN (COGS)</div>
+              <div className="text-[20px] font-bold text-[#6B705C]">{fmt(inventory.reduce((a,b) => a + (b.cogs * b.qty), 0))}</div>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-[#DCD9CC]">
+              <table className="w-full text-left border-collapse min-w-[600px]">
+                <thead>
+                  <tr className="bg-[#E8E6DB]">
+                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Nama Barang</th>
+                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Stok (Qty)</th>
+                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Harga Jual/pcs</th>
+                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">HPP (COGS)/pcs</th>
+                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC] text-right">Nilai Total</th>
+                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white">
+                  {inventory.map(inv => (
+                    <tr key={inv.id} className="border-b border-[#DCD9CC] last:border-0 hover:bg-[#FAF9F6] transition-colors">
+                      <td className="p-3 text-[13px] text-[#4A4A40] font-medium">
+                        {editInvId === inv.id ? (
+                          <input type="text" className="w-full border border-[#DCD9CC] p-1 rounded text-[12px]" value={editInvForm.name || ""} onChange={e => setEditInvForm({ ...editInvForm, name: e.target.value })} />
+                        ) : inv.name}
+                      </td>
+                      <td className="p-3 text-[13px] font-bold text-[#6B705C]">
+                        {editInvId === inv.id ? (
+                          <input type="number" className="w-[60px] border border-[#DCD9CC] p-1 rounded text-[12px]" value={editInvForm.qty || 0} onChange={e => setEditInvForm({ ...editInvForm, qty: Number(e.target.value) })} />
+                        ) : inv.qty}
+                      </td>
+                      <td className="p-3 text-[13px] text-[#A5A58D]">
+                        {editInvId === inv.id ? (
+                          <input type="number" className="w-[100px] border border-[#DCD9CC] p-1 rounded text-[12px]" value={editInvForm.price || 0} onChange={e => setEditInvForm({ ...editInvForm, price: Number(e.target.value) })} />
+                        ) : fmt(inv.price)}
+                      </td>
+                      <td className="p-3 text-[13px] text-[#A5A58D]">
+                        {editInvId === inv.id ? (
+                          <input type="number" className="w-[100px] border border-[#DCD9CC] p-1 rounded text-[12px]" value={editInvForm.cogs || 0} onChange={e => setEditInvForm({ ...editInvForm, cogs: Number(e.target.value) })} />
+                        ) : fmt(inv.cogs)}
+                      </td>
+                      <td className="p-3 text-[13px] font-semibold text-[#4A4A40] text-right">{fmt(inv.cogs * inv.qty)}</td>
+                      <td className="p-3 flex gap-2">
+                        {editInvId === inv.id ? (
+                          <>
+                            <button onClick={() => {
+                              setInventory(inventory.map(x => x.id === inv.id ? { ...x, ...editInvForm } as Inventory : x));
+                              setEditInvId(null);
+                            }} className="bg-[#367609] text-white px-2.5 py-1 rounded-md text-[11px] font-bold hover:bg-[#2e6408] transition-colors">Simpan</button>
+                            <button onClick={() => setEditInvId(null)} className="bg-gray-300 text-[#4A4A40] px-2.5 py-1 rounded-md text-[11px] font-bold hover:bg-gray-400 transition-colors">Batal</button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => { setEditInvId(inv.id); setEditInvForm(inv); }} className="text-[#6B705C] bg-[#FAF9F6] border border-[#DCD9CC] px-2.5 py-1 rounded-md text-[11px] font-bold hover:bg-white transition-colors">Edit</button>
+                            <button onClick={() => setInventory(inventory.filter(x => x.id !== inv.id))} className="text-[#B18B5E] bg-[#FAF9F6] border border-[#DCD9CC] px-2.5 py-1 rounded-md text-[11px] font-bold hover:bg-white transition-colors">Hapus</button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                  {inventory.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="p-6 text-center text-[13px] text-[#A5A58D]">Belum ada barang di inventori.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-4">
+              <button 
+                onClick={() => setInventory([...inventory, { id: Date.now(), name: 'Produk Baru (Contoh)', qty: 10, price: 150000, cogs: 80000 }])}
+                className="py-2 px-4 rounded-xl border border-[#DCD9CC] bg-[#FAF9F6] text-[#4A4A40] text-[12px] font-semibold hover:bg-white transition-colors">
+                + Tambah Barang
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ══════════════════════════════ LAPORAN ══════════════════════════════ */}
         {tab === "laporan" && (
-          <>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap gap-2 items-center justify-between mb-2">
+              <div className="flex bg-[#E8E6DB] p-1 rounded-xl">
+                {[
+                  { id: "lr", label: "Laba Rugi" },
+                  { id: "neraca", label: "Neraca" },
+                  { id: "gl", label: "Buku Besar" },
+                  { id: "pajak", label: "Pajak (UMKM)" }
+                ].map(lt => (
+                  <button
+                    key={lt.id}
+                    onClick={() => setLaporanTab(lt.id as "lr" | "neraca" | "gl" | "pajak")}
+                    className={`px-4 py-2 text-[13px] font-semibold rounded-lg transition-colors ${laporanTab === lt.id ? "bg-white text-[#4A4A40] shadow-sm" : "bg-transparent text-[#A5A58D] hover:text-[#4A4A40]"}`}
+                  >
+                    {lt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-4 bg-transparent">
+            {laporanTab === "lr" && (
+              <>
             {/* P&L Summary */}
-            <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm mb-4">
+            <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm mb-4 print:shadow-none print:border-none print:m-0 print:p-0">
               <div className="text-sm md:text-base font-semibold mb-4 text-[#4A4A40]">Laporan Laba Rugi — {filterMonth ? filterMonth : "Semua Periode"}</div>
               <div className="flex flex-col lg:grid lg:grid-cols-[1fr_1fr_260px] gap-6">
 
@@ -968,11 +1417,11 @@ export default function App() {
                 ))}
               </div>
               <div className="w-full h-[200px] md:h-[230px]">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" minWidth={10} minHeight={10}>
                   <BarChart data={dailyData} barGap={4} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#DCD9CC" vertical={false} />
-                    <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#A5A58D' }} tickLine={false} axisLine={false} />
-                    <YAxis tickFormatter={v => `${(v / 1000000).toFixed(1)}jt`} tick={{ fontSize: 11, fill: '#A5A58D' }} tickLine={false} axisLine={false} />
+                    <XAxis dataKey="dateFull" tickFormatter={(v) => v.slice(8)} tick={{ fontSize: 11, fill: '#A5A58D' }} tickLine={false} axisLine={false} />
+                    <YAxis tickFormatter={v => fmtS(v).replace('Rp ', '')} tick={{ fontSize: 11, fill: '#A5A58D' }} tickLine={false} axisLine={false} />
                     <Tooltip content={<CustomTip />} cursor={{fill: '#DCD9CC'}} />
                     <Bar dataKey="masuk" name="Pemasukan" fill="#6B705C" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="keluar" name="Pengeluaran" fill="#B18B5E" radius={[4, 4, 0, 0]} />
@@ -1002,6 +1451,167 @@ export default function App() {
           </>
         )}
 
+        {laporanTab === "neraca" && (
+          <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm print:shadow-none print:border-none print:m-0 print:p-0">
+            <div className="text-base font-semibold mb-4 text-[#4A4A40]">Neraca (Balance Sheet)</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {/* Aktiva */}
+              <div>
+                <h3 className="text-[13px] font-bold text-[#6B705C] border-b border-[#DCD9CC] pb-2 mb-2">AKTIVA (ASET)</h3>
+                <div className="flex justify-between text-[13px] py-2 border-b border-dashed border-[#DCD9CC]">
+                  <span className="text-[#A5A58D]">Kas & Bank</span>
+                  <span className="font-medium text-[#4A4A40]">{fmt(totalMasuk - totalKeluar)}</span>
+                </div>
+                <div className="flex justify-between text-[13px] py-2 border-b border-dashed border-[#DCD9CC]">
+                  <span className="text-[#A5A58D]">Piutang Usaha</span>
+                  <span className="font-medium text-[#4A4A40]">{fmt(debts.filter(d => d.type === 'piutang' && d.status === 'belum').reduce((a,b)=>a+b.amount,0))}</span>
+                </div>
+                <div className="flex justify-between text-[13px] py-2 border-b border-dashed border-[#DCD9CC]">
+                  <span className="text-[#A5A58D]">Persediaan (Stok)</span>
+                  <span className="font-medium text-[#4A4A40]">{fmt(inventory.reduce((a,b)=>a+(b.cogs*b.qty),0))}</span>
+                </div>
+                <div className="flex justify-between text-[14px] font-bold text-[#6B705C] pt-3 mt-1">
+                  <span>Total Aktiva</span>
+                  <span>{fmt((totalMasuk - totalKeluar) + debts.filter(d => d.type === 'piutang' && d.status === 'belum').reduce((a,b)=>a+b.amount,0) + inventory.reduce((a,b)=>a+(b.cogs*b.qty),0))}</span>
+                </div>
+              </div>
+              {/* Pasiva */}
+              <div>
+                <h3 className="text-[13px] font-bold text-[#B18B5E] border-b border-[#DCD9CC] pb-2 mb-2">PASIVA (KEWAJIBAN & EKUITAS)</h3>
+                <div className="flex justify-between text-[13px] py-2 border-b border-dashed border-[#DCD9CC]">
+                  <span className="text-[#A5A58D]">Hutang Usaha</span>
+                  <span className="font-medium text-[#4A4A40]">{fmt(debts.filter(d => d.type === 'hutang' && d.status === 'belum').reduce((a,b)=>a+b.amount,0))}</span>
+                </div>
+                <div className="flex justify-between text-[13px] py-2 border-b border-dashed border-[#DCD9CC]">
+                  <span className="text-[#A5A58D]">Modal Awal (Estimasi)</span>
+                  <span className="font-medium text-[#4A4A40]">{fmt(0)}</span>
+                </div>
+                <div className="flex justify-between text-[13px] py-2 border-b border-dashed border-[#DCD9CC]">
+                  <span className="text-[#A5A58D]">Laba Ditahan (Laba Rugi)</span>
+                  <span className="font-medium text-[#4A4A40]">{fmt(totalMasuk - totalKeluar)}</span>
+                </div>
+                <div className="flex justify-between text-[14px] font-bold text-[#B18B5E] pt-3 mt-1">
+                  <span>Total Pasiva</span>
+                  <span>{fmt(debts.filter(d => d.type === 'hutang' && d.status === 'belum').reduce((a,b)=>a+b.amount,0) + (totalMasuk - totalKeluar))}</span>
+                </div>
+              </div>
+            </div>
+            {((totalMasuk - totalKeluar) + debts.filter(d => d.type === 'piutang' && d.status === 'belum').reduce((a,b)=>a+b.amount,0) + inventory.reduce((a,b)=>a+(b.cogs*b.qty),0)) !== (debts.filter(d => d.type === 'hutang' && d.status === 'belum').reduce((a,b)=>a+b.amount,0) + (totalMasuk - totalKeluar)) && (
+              <div className="mt-4 p-3 bg-red-50 border border-red-200 text-red-700 text-[12px] rounded-xl text-center">
+                Perhatian: Aktiva dan Pasiva belum selaras (unbalanced). Perbedaan ini wajar terjadi karena Laba Ditahan disederhanakan dan Modal Awal di-set 0.
+              </div>
+            )}
+          </div>
+        )}
+
+        {laporanTab === "gl" && (
+          <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm print:shadow-none print:border-none print:m-0 print:p-0">
+            <div className="text-base font-semibold mb-4 text-[#4A4A40]">Buku Besar (General Ledger)</div>
+            <div className="text-[13px] text-[#A5A58D] mb-4">Pengelompokan transaksi berdasarkan kategori / akun (Chart of Accounts).</div>
+            <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
+              {[...new Set(filteredTxns.map(t => t.cat))].map(c => (
+                <div key={c} className="min-w-[260px] md:min-w-[300px] border border-[#DCD9CC] rounded-xl p-4 bg-[#FAF9F6] shrink-0">
+                  <div className="font-bold text-[#4A4A40] mb-3 border-b border-[#DCD9CC] pb-2">{c}</div>
+                  {filteredTxns.filter(t => t.cat === c).map(t => (
+                    <div key={t.id} className="flex flex-col py-2 border-b border-dashed border-[#DCD9CC] last:border-0">
+                      <div className="flex justify-between text-[12px]">
+                        <span className="text-[#A5A58D]">{new Date(t.date).toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                        <span className={t.type === 'masuk' ? 'text-[#6B705C] font-semibold' : 'text-[#B18B5E] font-semibold'}>
+                          {t.type === 'masuk' ? '+' : '-'}{fmt(t.amount)}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-[#A5A58D] italic truncate mt-1">{t.desc}</div>
+                    </div>
+                  ))}
+                  <div className="flex justify-between text-[13px] font-bold mt-2 pt-2 border-t border-[#DCD9CC] text-[#4A4A40]">
+                    <span>Mutasi</span>
+                    <span>{fmt(filteredTxns.filter(t => t.cat === c).reduce((a,b)=> a + (b.type === 'masuk' ? b.amount : -b.amount), 0))}</span>
+                  </div>
+                </div>
+              ))}
+              {filteredTxns.length === 0 && <div className="text-[13px] text-[#A5A58D]">Belum ada riwayat jurnal.</div>}
+            </div>
+          </div>
+        )}
+
+        {laporanTab === "pajak" && (
+          <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm print:shadow-none print:border-none print:m-0 print:p-0">
+            <div className="text-base font-semibold mb-4 text-[#4A4A40]">Estimasi Pajak UMKM (PPh Final 0.5%)</div>
+            <div className="text-[13px] text-[#A5A58D] mb-6 max-w-2xl leading-relaxed">
+              Penghitungan estimasi pajak penghasilan final berdasarkan PP No. 23 Tahun 2018 (0,5% dari omzet bruto). Tarik data sesuai periode yang difilter.
+            </div>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="border border-[#DCD9CC] rounded-xl p-4 bg-white flex flex-col justify-center">
+                <div className="text-[11px] font-bold text-[#A5A58D] mb-1">TOTAL OMZET/PENDAPATAN</div>
+                <div className="text-[18px] md:text-[22px] font-bold text-[#6B705C]">{fmt(totalMasuk)}</div>
+              </div>
+              <div className="border border-[#DCD9CC] rounded-xl p-4 bg-[#E8E6DB] flex flex-col justify-center">
+                <div className="text-[11px] font-bold text-[#4A4A40] mb-1">TARIF UMKM FINAL</div>
+                <div className="text-[18px] md:text-[22px] font-bold text-[#4A4A40]">0.5%</div>
+              </div>
+              <div className="border border-[#E8C39E] rounded-xl p-4 bg-[#FAF5ED] shadow-sm flex flex-col justify-center">
+                <div className="text-[11px] font-bold text-[#B18B5E] mb-1">ESTIMASI PAJAK TERHUTANG</div>
+                <div className="text-[20px] md:text-[24px] font-bold text-[#B18B5E]">{fmt(totalMasuk * 0.005)}</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========== RINCIAN TRANSAKSI UNTUK EDIT/HAPUS (Hanya tampil di Laporan) ========== */}
+        <div className="mt-8 bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm">
+          <div className="text-base font-semibold mb-4 text-[#4A4A40]">Rincian Transaksi ({filterMonth ? filterMonth : "Semua Periode"})</div>
+          
+          <div className="overflow-x-auto min-h-[200px] pr-1 md:pr-2">
+            <table className="w-full border-collapse text-[12px] md:text-[13px] text-left whitespace-nowrap md:whitespace-normal">
+              <thead className="sticky top-0 bg-[#FAF9F6] z-10 shadow-[0_1px_0_#DCD9CC]">
+                <tr>
+                  <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold md:w-[15%]">Tanggal</th>
+                  <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold md:w-[35%] whitespace-normal">Keterangan</th>
+                  <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-right">Debet (Masuk)</th>
+                  <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-right">Kredit (Keluar)</th>
+                  <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-center w-[60px]">Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredTxns.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-[#A5A58D]">Tidak ada transaksi.</td>
+                  </tr>
+                ) : (
+                  filteredTxns.map((t, index) => (
+                    <tr key={t.id} className={`border-b border-[#E8E6DB] ${index % 2 === 0 ? 'bg-white' : 'bg-[#FAF9F6]'} hover:bg-gray-50`}>
+                      <td className="py-3 px-3 md:px-4 text-[#4A4A40]">{new Date(t.date).toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}</td>
+                      <td className="py-3 px-3 md:px-4">
+                        <div className="font-medium text-[#4A4A40] w-32 sm:w-auto truncate md:whitespace-normal xl:line-clamp-2">{t.desc}</div>
+                        <div className="text-[11px] text-[#A5A58D] mt-1">{t.cat}</div>
+                      </td>
+                      <td className="py-3 px-3 md:px-4 text-right font-medium text-[#6B705C]">
+                        {t.type === 'masuk' ? fmt(t.amount) : '-'}
+                      </td>
+                      <td className="py-3 px-3 md:px-4 text-right font-medium text-[#B18B5E]">
+                       {t.type === 'keluar' ? fmt(t.amount) : '-'}
+                      </td>
+                      <td className="py-3 px-3 md:px-4 text-center whitespace-nowrap">
+                        <button onClick={() => startEdit(t)} className="bg-transparent border-none cursor-pointer text-[#6B705C] px-1 md:px-2 py-1 rounded hover:bg-black/5 text-[14px] md:text-[16px]">
+                          ✏️
+                        </button>
+                        <button onClick={() => setDeleteId(t.id)} className="bg-transparent border-none cursor-pointer text-[#B18B5E] px-1 md:px-2 py-1 rounded hover:bg-black/5 text-[14px] md:text-[16px]">
+                          🗑️
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+      </div>
+        )}
+
         {/* ══════════════════════════════ AI ASISTEN ══════════════════════════════ */}
         {tab === "asisten" && (
           <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm mx-auto w-full md:max-w-[700px] flex flex-col h-[75vh] md:h-[calc(100vh-180px)] mt-4">
@@ -1009,7 +1619,7 @@ export default function App() {
               <div className="text-sm md:text-base font-semibold mb-1 text-[#4A4A40]">💬 AI Asisten: My Akuntansi</div>
               <div className="text-[12px] md:text-[13px] text-[#A5A58D]">Tanyakan informasi seputar kas, laba, pemasukan, atau pengeluaran Anda. Historis percakapan disimpan untuk referensi Anda.</div>
             </div>
-            
+
             <div className="flex-1 overflow-y-auto p-3 md:p-4 border border-[#DCD9CC] bg-[#efeae2] rounded-xl mb-4 flex flex-col gap-2 relative">
               {aiChatHistory.length === 0 ? (
                 <div className="mx-auto mt-4 bg-white/70 px-3 py-1.5 rounded-xl text-[#554] text-[12px] md:text-[13px] text-center">

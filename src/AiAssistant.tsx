@@ -23,6 +23,9 @@ export function AiAssistant({ txns, setTxns, catsMasuk, catsKeluar, onExport }: 
     setLoading(true);
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -32,8 +35,11 @@ export function AiAssistant({ txns, setTxns, catsMasuk, catsKeluar, onExport }: 
           catsMasuk,
           catsKeluar,
           mode: 'floating_ai'
-        })
+        }),
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error("Gagal menghubungi server");

@@ -59,6 +59,9 @@ export default function App() {
     }
   });
   
+  const [showLoginConfirm, setShowLoginConfirm] = useState(false);
+  const [loginType, setLoginType] = useState<"individu" | "workspace" | null>(null);
+
   useEffect(() => {
     const timer = setTimeout(() => setShowSplash(false), 2000);
     return () => clearTimeout(timer);
@@ -430,7 +433,7 @@ export default function App() {
           
           <div className="flex flex-col gap-3">
             <button 
-              onClick={() => setIsLoggedIn(true)}
+              onClick={() => { setLoginType("individu"); setShowLoginConfirm(true); }}
               className="w-full bg-white border border-[#DCD9CC] text-[#4A4A40] font-medium py-3 md:py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm group"
             >
               <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform"/>
@@ -438,7 +441,7 @@ export default function App() {
             </button>
 
             <button 
-              onClick={() => setIsLoggedIn(true)}
+              onClick={() => { setLoginType("workspace"); setShowLoginConfirm(true); }}
               className="w-full bg-white border border-[#DCD9CC] text-[#4A4A40] font-medium py-3 md:py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm group"
             >
               <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform grayscale opacity-80 group-hover:grayscale-0 group-hover:opacity-100"/>
@@ -450,6 +453,42 @@ export default function App() {
             Dengan melanjutkan, Anda menyetujui <br/>
             <a href="#" className="text-[#6B705C] hover:underline">Syarat Ketentuan</a> dan <a href="#" className="text-[#6B705C] hover:underline">Kebijakan Privasi</a> kami.
           </div>
+
+          {/* Konfirmasi Login Modal */}
+          {showLoginConfirm && (
+            <div className="fixed inset-0 bg-black/50 flex flex-col items-center justify-center z-50 p-4">
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className="bg-white p-6 rounded-2xl w-full max-w-sm shadow-2xl relative text-left"
+              >
+                <div className="w-12 h-12 bg-[#E8E6DB] rounded-full flex items-center justify-center mb-4">
+                  <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" className="w-6 h-6"/>
+                </div>
+                <h3 className="text-[#4A4A40] text-lg font-bold mb-2">Konfirmasi Akun</h3>
+                <p className="text-[13px] text-[#A5A58D] mb-6 leading-relaxed">
+                  Anda akan masuk menggunakan akun Google {loginType === "workspace" ? "Workspace" : "Individu"}. Apakah Anda ingin melanjutkan?
+                </p>
+                <div className="flex gap-3 mt-2">
+                  <button 
+                    onClick={() => setShowLoginConfirm(false)}
+                    className="flex-1 py-2.5 px-4 border border-[#DCD9CC] bg-white rounded-xl text-[13px] font-semibold text-[#4A4A40] hover:bg-gray-50 transition-colors"
+                  >
+                    Batal
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setShowLoginConfirm(false);
+                      setIsLoggedIn(true);
+                    }}
+                    className="flex-1 py-2.5 px-4 bg-[#367609] hover:bg-[#2e6408] rounded-xl text-white font-semibold text-[13px] shadow-md transition-colors border border-transparent"
+                  >
+                    Ya, Lanjutkan
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
         </div>
       </div>
     );

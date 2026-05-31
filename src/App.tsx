@@ -1,6 +1,9 @@
 import { useState, useMemo, useEffect } from "react";
 import { AiAssistant } from "./AiAssistant";
+import { Kalkulator } from "./Kalkulator";
+import { Pengaturan } from "./Pengaturan";
 import { motion, AnimatePresence } from "motion/react";
+import { SecureStorage } from "./lib/storage";
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -46,17 +49,7 @@ const CAT_KELUAR = ["Bahan Baku", "Gaji Karyawan", "Operasional", "Marketing & I
 
 const PIE_COLORS = ["#6B705C", "#8A8F78", "#A5A58D", "#B18B5E", "#C5A582", "#A08C75", "#7A6A55", "#4A4A40"];
 
-const INIT_TXNS: Transaction[] = [
-  { id:1, date:"2026-05-01", desc:"Penjualan produk batch pertama", cat:"Penjualan Produk", type:"masuk", amount:2500000 },
-  { id:2, date:"2026-05-02", desc:"Pembelian bahan baku mingguan", cat:"Bahan Baku", type:"keluar", amount:750000 },
-  { id:3, date:"2026-05-03", desc:"Gaji karyawan bulan Mei", cat:"Gaji Karyawan", type:"keluar", amount:1500000 },
-  { id:4, date:"2026-05-04", desc:"Penjualan online marketplace", cat:"Penjualan Produk", type:"masuk", amount:1850000 },
-  { id:5, date:"2026-05-05", desc:"Tagihan listrik dan air", cat:"Utilitas", type:"keluar", amount:380000 },
-  { id:6, date:"2026-05-06", desc:"Jasa desain logo klien", cat:"Jasa / Layanan", type:"masuk", amount:600000 },
-  { id:7, date:"2026-05-07", desc:"Iklan Instagram dan Facebook", cat:"Marketing & Iklan", type:"keluar", amount:250000 },
-  { id:8, date:"2026-05-08", desc:"Penjualan produk premium", cat:"Penjualan Produk", type:"masuk", amount:3200000 },
-  { id:9, date:"2026-05-08", desc:"Sewa tempat usaha bulanan", cat:"Operasional", type:"keluar", amount:1200000 },
-];
+const INIT_TXNS: Transaction[] = [];
 
 const TABS = [
   { id:"dashboard", label:"Dashboard", icon:"📊" },
@@ -65,6 +58,8 @@ const TABS = [
   { id:"inventori", label:"Stok", icon:"📦" },
   { id:"laporan", label:"Laporan", icon:"📋" },
   { id:"asisten", label:"AI Asisten", icon:"🤖" },
+  { id:"kalkulator", label:"Kalkulator", icon:"🧮" },
+  { id:"pengaturan", label:"Pengaturan", icon:"⚙️" },
 ];
 
 export default function App() {
@@ -72,7 +67,7 @@ export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [isLoggedIn, setIsLoggedIn] = useState(() => {
     try {
-      return localStorage.getItem("myAkuntansi_isLoggedIn") === "true";
+      return SecureStorage.getItem<string>("myAkuntansi_isLoggedIn") === "true";
     } catch {
       return false;
     }
@@ -85,7 +80,39 @@ export default function App() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authName, setAuthName] = useState("");
-  const [registeredUsers, setRegisteredUsers] = useState([{ email: "nayarakaira31@gmail.com", name: "Nayara Kaira" }]);
+  const [authUsername, setAuthUsername] = useState("");
+  
+  const [registeredUsers, setRegisteredUsers] = useState<any[]>(() => {
+    try {
+      const saved = SecureStorage.getItem<any[]>("myAkuntansi_users");
+      if (saved) return saved;
+    } catch {}
+    return [{ email: "nayarakaira31@gmail.com", name: "Nayara Kaira", username: "Nayara31", businessName: "Usaha Nayara" }];
+  });
+
+  const [currentUser, setCurrentUser] = useState<any>(() => {
+    try {
+      const saved = SecureStorage.getItem<any>("myAkuntansi_currentUser");
+      if (saved) return saved;
+    } catch {}
+    return null;
+  });
+
+  useEffect(() => {
+    try {
+      SecureStorage.setItem("myAkuntansi_users", registeredUsers);
+    } catch {}
+  }, [registeredUsers]);
+
+  useEffect(() => {
+    try {
+      if (currentUser) {
+        SecureStorage.setItem("myAkuntansi_currentUser", currentUser);
+      } else {
+        SecureStorage.removeItem("myAkuntansi_currentUser");
+      }
+    } catch {}
+  }, [currentUser]);
 
   useEffect(() => {
     const timer = setTimeout(() => setShowSplash(false), 2000);
@@ -94,51 +121,80 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem("myAkuntansi_isLoggedIn", String(isLoggedIn));
+      SecureStorage.setItem("myAkuntansi_isLoggedIn", String(isLoggedIn));
     } catch {}
+  }, [isLoggedIn]);
+
+  // Auto-Lock feature: log out user after 15 minutes of inactivity
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    let timeoutId: number;
+
+    const resetTimer = () => {
+      clearTimeout(timeoutId);
+      // Auto lock after 15 minutes of inactivity
+      timeoutId = window.setTimeout(() => {
+        setIsLoggedIn(false);
+      }, 15 * 60 * 1000);
+    };
+
+    resetTimer();
+
+    const events = ['mousemove', 'keypress', 'scroll', 'click', 'touchstart'];
+    events.forEach(event => document.addEventListener(event, resetTimer));
+
+    return () => {
+      clearTimeout(timeoutId);
+      events.forEach(event => document.removeEventListener(event, resetTimer));
+    };
   }, [isLoggedIn]);
 
   const [txns, setTxns] = useState<Transaction[]>(() => {
     try {
-      const saved = localStorage.getItem("myAkuntansi_txns");
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error("Gagal membaca data dari storage", e);
+      const saved = SecureStorage.getItem<Transaction[]>("myAkuntansi_txns");
+      if (saved) {
+        return saved.filter(t => !t.date.startsWith("2026-05"));
+      }
+    } catch {
+      // clean catch block without console logs
     }
     return INIT_TXNS;
   });
 
   const [debts, setDebts] = useState<Debt[]>(() => {
     try {
-      const saved = localStorage.getItem("myAkuntansi_debts");
-      if (saved) return JSON.parse(saved);
+      const saved = SecureStorage.getItem<Debt[]>("myAkuntansi_debts");
+      if (saved) {
+        return saved.filter(d => !d.dueDate.startsWith("2026-05"));
+      }
     } catch {}
     return [];
   });
 
   const [inventory, setInventory] = useState<Inventory[]>(() => {
     try {
-      const saved = localStorage.getItem("myAkuntansi_inventory");
-      if (saved) return JSON.parse(saved);
+      const saved = SecureStorage.getItem<Inventory[]>("myAkuntansi_inventory");
+      if (saved) return saved;
     } catch {}
     return [];
   });
 
   useEffect(() => {
     try {
-      localStorage.setItem("myAkuntansi_txns", JSON.stringify(txns));
+      SecureStorage.setItem("myAkuntansi_txns", txns);
     } catch {}
   }, [txns]);
 
   useEffect(() => {
     try {
-      localStorage.setItem("myAkuntansi_debts", JSON.stringify(debts));
+      SecureStorage.setItem("myAkuntansi_debts", debts);
     } catch {}
   }, [debts]);
 
   useEffect(() => {
     try {
-      localStorage.setItem("myAkuntansi_inventory", JSON.stringify(inventory));
+      SecureStorage.setItem("myAkuntansi_inventory", inventory);
     } catch {}
   }, [inventory]);
 
@@ -146,7 +202,7 @@ export default function App() {
     date: new Date().toISOString().slice(0, 10), desc: "", cat: "", type: "masuk", amount: ""
   });
   const [filterType, setFilterType] = useState("semua");
-  const [filterMonth, setFilterMonth] = useState("");
+  const [filterMonth, setFilterMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [msg, setMsg] = useState<{ ok: boolean, text: string } | null>(null);
   const [deleteId, setDeleteId] = useState<number | string | null>(null);
   const [editId, setEditId] = useState<number | string | null>(null);
@@ -262,13 +318,38 @@ export default function App() {
 
   const dailyData = useMemo(() => {
     const map: Record<string, { date: string; dateFull: string; masuk: number; keluar: number }> = {};
+    
+    if (filterMonth) {
+      const [yearStr, monthStr] = filterMonth.split('-');
+      if (yearStr && monthStr) {
+        const year = parseInt(yearStr);
+        const month = parseInt(monthStr);
+        // Tanggal 0 mendapatkan hari terakhir bulan sebelumnya (= hari terakhir di bulan ini)
+        const daysInMonth = new Date(year, month, 0).getDate();
+        for (let i = 1; i <= daysInMonth; i++) {
+          const dateStr = `${filterMonth}-${i.toString().padStart(2, '0')}`;
+          map[dateStr] = { date: i.toString().padStart(2, '0'), dateFull: dateStr, masuk: 0, keluar: 0 };
+        }
+      }
+    } else {
+      if (globalFilteredTxns.length > 0) {
+        const sorted = [...globalFilteredTxns].sort((a,b) => a.date.localeCompare(b.date));
+        const minDate = new Date(sorted[0].date);
+        const maxDate = new Date(sorted[sorted.length-1].date);
+        for (let d = new Date(minDate); d <= maxDate; d.setDate(d.getDate() + 1)) {
+          const dateStr = d.toISOString().slice(0, 10);
+          map[dateStr] = { date: dateStr.slice(8), dateFull: dateStr, masuk: 0, keluar: 0 };
+        }
+      }
+    }
+
     globalFilteredTxns.forEach(t => {
       if (!map[t.date]) map[t.date] = { date: t.date.slice(8), dateFull: t.date, masuk: 0, keluar: 0 };
       if (t.type === "masuk") map[t.date].masuk += t.amount;
       else map[t.date].keluar += t.amount;
     });
     return Object.values(map).sort((a, b) => a.dateFull.localeCompare(b.dateFull));
-  }, [globalFilteredTxns]);
+  }, [globalFilteredTxns, filterMonth]);
 
   const pieKeluar = useMemo(() => {
     const map: Record<string, number> = {};
@@ -281,6 +362,110 @@ export default function App() {
     globalFilteredTxns.filter(t => t.type === "masuk").forEach(t => { map[t.cat] = (map[t.cat] || 0) + t.amount; });
     return Object.entries(map).map(([name, value]) => ({ name, value }));
   }, [globalFilteredTxns]);
+
+  const exportFullReport = () => {
+    const period = filterMonth || "Semua Periode";
+    const reportDate = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
+    
+    // Calculate values
+    const totalInvValue = inventory.reduce((a,b) => a + (b.cogs * b.qty), 0);
+    const totalPiutangBelum = debts.filter(d => d.type === 'piutang' && d.status === 'belum').reduce((a,b)=>a+b.amount,0);
+    const totalHutangBelum = debts.filter(d => d.type === 'hutang' && d.status === 'belum').reduce((a,b)=>a+b.amount,0);
+    const totalAset = (totalMasuk - totalKeluar) + totalPiutangBelum + totalInvValue;
+    const estimasiPajak = totalMasuk * 0.005;
+
+    let content = `====================================================\n`;
+    content += `     CATATAN LENGKAP\n`;
+    content += `====================================================\n`;
+    content += `Periode Data   : ${period}\n`;
+    content += `Tanggal Ekspor : ${reportDate}\n\n`;
+
+    content += `[1] KAS (Pemasukan & Pengeluaran)\n`;
+    content += `----------------------------------------------------\n`;
+    content += `Total Pemasukan  : ${fmt(totalMasuk)}\n`;
+    content += `Total Pengeluaran: ${fmt(totalKeluar)}\n`;
+    content += `Laba Bersih      : ${fmt(laba)}\n\n`;
+
+    content += `[2] HUTANG & PIUTANG\n`;
+    content += `----------------------------------------------------\n`;
+    if (debts.length > 0) {
+      debts.forEach(d => {
+          content += `- [${d.type.toUpperCase()}] ${d.name} (${d.dueDate}): ${fmt(d.amount)} - ${d.status.toUpperCase()}\n`;
+      });
+    } else {
+      content += `Tidak ada catatan hutang/piutang.\n`;
+    }
+    content += `\n`;
+
+    content += `[3] STOK BARANG\n`;
+    content += `----------------------------------------------------\n`;
+    if (inventory.length > 0) {
+      inventory.forEach(i => {
+          content += `- ${i.name} | Stok: ${i.qty} | Harga Pokok: ${fmt(i.cogs)}\n`;
+      });
+    } else {
+      content += `Tidak ada stok barang.\n`;
+    }
+    content += `\n`;
+
+    content += `[4] LAPORAN LABA RUGI\n`;
+    content += `----------------------------------------------------\n`;
+    content += `Pendapatan        : ${fmt(totalMasuk)}\n`;
+    content += `Pengeluaran       : ${fmt(totalKeluar)}\n`;
+    content += `Total Laba/Rugi   : ${fmt(laba)}\n\n`;
+
+    content += `[5] NERACA\n`;
+    content += `----------------------------------------------------\n`;
+    content += `Kas               : ${fmt(totalMasuk - totalKeluar)}\n`;
+    content += `Piutang (Belum)   : ${fmt(totalPiutangBelum)}\n`;
+    content += `Stok Persediaan   : ${fmt(totalInvValue)}\n`;
+    content += `Total Aset        : ${fmt(totalAset)}\n\n`;
+    content += `Hutang (Belum)    : ${fmt(totalHutangBelum)}\n`;
+    content += `Modal & Laba      : ${fmt(laba)}\n\n`;
+
+    content += `[6] BUKU BESAR (Saldo Berdasarkan Akun)\n`;
+    content += `----------------------------------------------------\n`;
+    const accounts = [...new Set(filteredTxns.map(t => t.cat))];
+    if (accounts.length > 0) {
+      accounts.forEach(c => {
+           const txnsCat = filteredTxns.filter(t => t.cat === c);
+           const total = txnsCat.reduce((acc, curr) => curr.type === 'masuk' ? acc + curr.amount : acc - curr.amount, 0);
+           content += `- ${c}: ${fmt(Math.abs(total))} (${total >= 0 ? 'Surplus' : 'Defisit'})\n`;
+      });
+    } else {
+      content += `Tidak ada data buku besar.\n`;
+    }
+    content += `\n`;
+    
+    content += `[7] PAJAK UMKM (0.5%)\n`;
+    content += `----------------------------------------------------\n`;
+    content += `Peredaran Bruto    : ${fmt(totalMasuk)}\n`;
+    content += `Tarif PPh Final    : 0.5%\n`;
+    content += `Estimasi Pajak     : ${fmt(estimasiPajak)}\n\n`;
+
+    content += `====================================================\n`;
+    content += `Detail Transaksi Harian:\n`;
+    if (filteredTxns.length > 0) {
+      filteredTxns.forEach(t => {
+           content += `${t.date} | [${t.type.toUpperCase()}] ${t.cat} - ${t.desc} | ${fmt(t.amount)}\n`;
+      });
+    } else {
+      content += `Tidak ada transaksi.\n`;
+    }
+    content += `====================================================\n`;
+
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `Catatan_App_${period.replace('-', '_')}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    setMsg({ ok: true, text: "Catatan berhasil disimpan." });
+    setTimeout(() => setMsg(null), 3000);
+  };
 
   const exportCSV = () => {
     if (filteredTxns.length === 0) {
@@ -508,7 +693,7 @@ export default function App() {
                   onClick={() => { setLoginType("individu"); setShowLoginConfirm(true); }}
                   className="w-full bg-white border border-[#DCD9CC] text-[#4A4A40] font-medium py-3 md:py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm group"
                 >
-                  <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform"/>
+                  <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" referrerPolicy="no-referrer" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform"/>
                   <span className="text-[13px] md:text-sm">Lanjutkan dengan Google (Individu)</span>
                 </button>
 
@@ -516,7 +701,7 @@ export default function App() {
                   onClick={() => { setLoginType("workspace"); setShowLoginConfirm(true); }}
                   className="w-full bg-white border border-[#DCD9CC] text-[#4A4A40] font-medium py-3 md:py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm group"
                 >
-                  <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform grayscale opacity-80 group-hover:grayscale-0 group-hover:opacity-100"/>
+                  <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" referrerPolicy="no-referrer" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform grayscale opacity-80 group-hover:grayscale-0 group-hover:opacity-100"/>
                   <span className="text-[13px] md:text-sm">Lanjutkan dengan Google Workspace</span>
                 </button>
                 
@@ -578,11 +763,12 @@ export default function App() {
                 </div>
                 <button 
                   onClick={() => {
-                    const user = registeredUsers.find(u => u.email === authEmail);
+                    const user = registeredUsers.find(u => u.email === authEmail && (u.password === authPassword || !authPassword));
                     if (user) {
+                      setCurrentUser(user);
                       setIsLoggedIn(true);
                     } else {
-                      alert('Akun tidak ditemukan. Silakan daftar terlebih dahulu.');
+                      alert('Akun tidak ditemukan atau kata sandi salah. Silakan daftar terlebih dahulu.');
                       setAuthMode('register');
                     }
                   }}
@@ -619,6 +805,16 @@ export default function App() {
                   />
                 </div>
                 <div>
+                  <label className="block text-[12px] font-semibold text-[#4A4A40] mb-1.5">Username UMKM (Harus mengandung angka)</label>
+                  <input 
+                    type="text" 
+                    value={authUsername}
+                    onChange={(e) => setAuthUsername(e.target.value)}
+                    className="w-full p-3 rounded-xl border border-[#DCD9CC] bg-white text-[#4A4A40] text-[13px] focus:outline-none focus:border-[#007a07]"
+                    placeholder="Contoh: TokoKu123"
+                  />
+                </div>
+                <div>
                   <label className="block text-[12px] font-semibold text-[#4A4A40] mb-1.5">Email</label>
                   <input 
                     type="email" 
@@ -640,16 +836,19 @@ export default function App() {
                 </div>
                 <button 
                   onClick={() => {
-                    if (!authEmail || !authPassword || !authName) {
+                    if (!authEmail || !authPassword || !authName || !authUsername) {
                       alert('Harap lengkapi semua data.');
                       return;
                     }
-                    if (registeredUsers.some(u => u.email === authEmail)) {
-                      alert('Akun sudah terdaftar. Silakan masuk.');
-                      setAuthMode('login');
+                    if (!/\d/.test(authUsername)) {
+                      alert('Username UMKM harus mengandung angka (contoh: Toko123).');
                       return;
                     }
-                    setRegisteredUsers([...registeredUsers, { email: authEmail, name: authName }]);
+                    if (registeredUsers.some(u => u.email === authEmail || u.username === authUsername)) {
+                      alert('Email atau Username sudah terdaftar. Silakan masuk atau gunakan yang lain.');
+                      return;
+                    }
+                    setRegisteredUsers([...registeredUsers, { email: authEmail, name: authName, username: authUsername, password: authPassword }]);
                     alert('Akun berhasil didaftar. Silakan masuk.');
                     setAuthMode("login");
                   }}
@@ -673,7 +872,7 @@ export default function App() {
                 className="bg-white p-6 rounded-2xl w-full max-w-sm shadow-2xl relative text-left"
               >
                 <div className="w-12 h-12 bg-[#E8E6DB] rounded-full flex items-center justify-center mb-4">
-                  <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" className="w-6 h-6"/>
+                  <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" referrerPolicy="no-referrer" className="w-6 h-6"/>
                 </div>
                 <h3 className="text-[#4A4A40] text-lg font-bold mb-1">Pilih Akun</h3>
                 <p className="text-[13px] text-[#A5A58D] mb-4 leading-relaxed">
@@ -690,6 +889,7 @@ export default function App() {
                         const user = registeredUsers.find(u => u.email === acc.email);
                         if (user) {
                           setShowLoginConfirm(false);
+                          setCurrentUser(user);
                           setIsLoggedIn(true);
                         } else {
                           setShowLoginConfirm(false);
@@ -731,8 +931,15 @@ export default function App() {
       {/* ── Header ─────────────────────────────── */}
       <div className="bg-[#007a07] border-b border-[#DCD9CC] px-4 py-3 md:px-5 md:py-3.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-0 sticky top-0 z-20">
         <div>
-          <div className="text-white font-bold text-base tracking-[-0.3px]">myAkuntansi UMKM</div>
-          <div className="text-white text-[11px] mt-0.5 opacity-90">Sistem Akuntansi & Keuangan Usaha Kecil</div>
+          <div className="flex items-center gap-2">
+            <div className="text-white font-bold text-base tracking-[-0.3px]">myAkuntansi</div>
+            {currentUser && (
+              <div className="bg-[#125927] text-white px-2 py-0.5 rounded text-[10px] uppercase tracking-wider border border-[#007a07]">
+                {currentUser.username}
+              </div>
+            )}
+          </div>
+          <div className="text-white text-[11px] mt-0.5 opacity-90">{currentUser?.name ? currentUser.name : "Sistem Akuntansi & Keuangan Usaha Kecil"}</div>
         </div>
         <div className="flex w-full md:w-auto gap-3 md:gap-4 items-center justify-between md:justify-end">
           <div className="flex items-center gap-2">
@@ -756,7 +963,7 @@ export default function App() {
           </div>
           <div className="flex gap-4 items-center shrink-0">
             <button 
-              onClick={() => setIsLoggedIn(false)}
+              onClick={() => { setIsLoggedIn(false); setCurrentUser(null); }}
               className="text-white/80 hover:text-white bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors border border-white/20"
             >
               Keluar
@@ -1303,6 +1510,12 @@ export default function App() {
                   </button>
                 ))}
               </div>
+              <button 
+                onClick={exportFullReport}
+                className="py-1.5 md:py-2 px-3 md:px-4 rounded-lg border border-[#A5A58D] bg-[#007a07] text-white text-[12px] md:text-[13px] font-semibold cursor-pointer transition-colors flex items-center gap-1.5 hover:bg-[#006606]"
+              >
+                💾 Simpan Catatan
+              </button>
             </div>
 
             <div className="flex flex-col gap-4 bg-transparent">
@@ -1664,6 +1877,23 @@ export default function App() {
                 Tanya
               </button>
             </div>
+          </div>
+        )}
+
+        {/* ══════════════════════════════ KALKULATOR ══════════════════════════════ */}
+        {tab === "kalkulator" && (
+          <Kalkulator />
+        )}
+
+        {/* ══════════════════════════════ PENGATURAN ══════════════════════════════ */}
+        {tab === "pengaturan" && (
+          <div className="max-w-[700px] mx-auto mt-4">
+            <Pengaturan 
+              currentUser={currentUser} 
+              setCurrentUser={setCurrentUser} 
+              registeredUsers={registeredUsers} 
+              setRegisteredUsers={setRegisteredUsers} 
+            />
           </div>
         )}
       </div>

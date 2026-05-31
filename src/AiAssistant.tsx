@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { GoogleGenAI, Type } from '@google/genai';
 
 interface AiAssistantProps {
   txns: any[];
@@ -78,7 +77,6 @@ export function AiAssistant({ txns, setTxns, catsMasuk, catsKeluar, onExport }: 
       }
 
     } catch (error: any) {
-      console.error(error);
       setMessages(prev => [...prev, { role: 'assistant', text: `Error: ${error.message}` }]);
     } finally {
       setLoading(false);

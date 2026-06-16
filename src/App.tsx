@@ -3,7 +3,7 @@ import { AiAssistant } from "./AiAssistant";
 import { Kalkulator } from "./Kalkulator";
 import { Pengaturan } from "./Pengaturan";
 import { motion, AnimatePresence } from "motion/react";
-import { SecureStorage } from "./lib/storage";
+import { SecureStorage, hashPassword } from "./lib/storage";
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
@@ -93,7 +93,11 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<any>(() => {
     try {
       const saved = SecureStorage.getItem<any>("myAkuntansi_currentUser");
-      if (saved) return saved;
+      if (saved) {
+        const pwdToUse = saved.password ? hashPassword(saved.password) : "empty-google-oauth-session-key-part";
+        SecureStorage.setUserSession(saved.email, pwdToUse);
+        return saved;
+      }
     } catch {}
     return null;
   });
@@ -122,6 +126,9 @@ export default function App() {
   useEffect(() => {
     try {
       SecureStorage.setItem("myAkuntansi_isLoggedIn", String(isLoggedIn));
+      if (!isLoggedIn) {
+        SecureStorage.setUserSession("", "");
+      }
     } catch {}
   }, [isLoggedIn]);
 
@@ -364,7 +371,9 @@ export default function App() {
   }, [globalFilteredTxns]);
 
   const exportFullReport = () => {
-    const period = filterMonth || "Semua Periode";
+    const periodRaw = filterMonth || "Semua Periode";
+    const reportYear = filterMonth ? filterMonth.split('-')[0] : new Date().getFullYear().toString();
+    const periodText = filterMonth ? new Date(filterMonth + "-01").toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }) : "Semua Periode";
     const reportDate = new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' });
     
     // Calculate values
@@ -375,9 +384,9 @@ export default function App() {
     const estimasiPajak = totalMasuk * 0.005;
 
     let content = `====================================================\n`;
-    content += `     CATATAN LENGKAP\n`;
+    content += `     CATATAN LENGKAP - TAHUN PENYIMPANAN ${reportYear}\n`;
     content += `====================================================\n`;
-    content += `Periode Data   : ${period}\n`;
+    content += `Periode Data   : ${periodText}\n`;
     content += `Tanggal Ekspor : ${reportDate}\n\n`;
 
     content += `[1] KAS (Pemasukan & Pengeluaran)\n`;
@@ -458,7 +467,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `Catatan_App_${period.replace('-', '_')}.txt`;
+    link.download = `Catatan_App_${periodRaw.replace('-', '_')}_Tahun_${reportYear}.txt`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -682,10 +691,15 @@ export default function App() {
         </div>
 
         <div className="bg-white border border-[#DCD9CC] rounded-[24px] w-full max-w-sm p-6 md:p-8 shadow-sm text-center relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#007a07] to-[#B18B5E]"></div>
+          <div className="absolute top-0 left-0 w-full h-1" style={{ backgroundColor: "#5194ff" }}></div>
 
           {authMode === "options" && (
             <>
+              <div className="flex justify-center mb-5">
+                <div className="w-14 h-14 bg-[#FAF9F6] border border-[#DCD9CC] rounded-full flex items-center justify-center shadow-sm">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" alt="Google" className="w-7 h-7" />
+                </div>
+              </div>
               <h2 className="text-lg font-semibold text-[#4A4A40] mb-6">Masuk ke Akun Anda</h2>
 
               <div className="flex flex-col gap-3">
@@ -693,7 +707,7 @@ export default function App() {
                   onClick={() => { setLoginType("individu"); setShowLoginConfirm(true); }}
                   className="w-full bg-white border border-[#DCD9CC] text-[#4A4A40] font-medium py-3 md:py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm group"
                 >
-                  <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" referrerPolicy="no-referrer" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform"/>
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" alt="Google Logo" referrerPolicy="no-referrer" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform"/>
                   <span className="text-[13px] md:text-sm">Lanjutkan dengan Google (Individu)</span>
                 </button>
 
@@ -701,7 +715,7 @@ export default function App() {
                   onClick={() => { setLoginType("workspace"); setShowLoginConfirm(true); }}
                   className="w-full bg-white border border-[#DCD9CC] text-[#4A4A40] font-medium py-3 md:py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm group"
                 >
-                  <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" referrerPolicy="no-referrer" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform grayscale opacity-80 group-hover:grayscale-0 group-hover:opacity-100"/>
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" alt="Google Logo" referrerPolicy="no-referrer" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform grayscale opacity-80 group-hover:grayscale-0 group-hover:opacity-100"/>
                   <span className="text-[13px] md:text-sm">Lanjutkan dengan Google Workspace</span>
                 </button>
                 
@@ -713,13 +727,14 @@ export default function App() {
 
                 <button 
                   onClick={() => setAuthMode("login")}
-                  className="w-full bg-[#007a07] text-white font-medium py-3 md:py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-[#006606] transition-all shadow-sm group"
+                  className="w-full text-white font-medium py-3 md:py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 transition-all shadow-sm group"
+                  style={{ backgroundColor: "#5194ff" }}
                 >
                   <span className="text-[13px] md:text-sm">Masuk dengan Email</span>
                 </button>
                 
                 <div className="mt-2 text-[13px] text-[#4A4A40]">
-                  Belum punya akun? <button onClick={() => setAuthMode("register")} className="text-[#007a07] font-semibold hover:underline">Daftar sekarang</button>
+                  Belum punya akun? <button onClick={() => setAuthMode("register")} className="text-[#007a07] font-semibold hover:underline" style={{ color: "#000000" }}>Daftar sekarang</button>
                 </div>
               </div>
 
@@ -738,9 +753,23 @@ export default function App() {
               >
                 ← Kembali
               </button>
-              <h2 className="text-lg font-semibold text-[#4A4A40] mb-6">Masuk dengan Email</h2>
+              <h2 className="text-lg font-semibold text-[#4A4A40] mb-6">Masuk ke Akun</h2>
               
               <div className="flex flex-col gap-4">
+                <button 
+                  onClick={() => { setLoginType("individu"); setShowLoginConfirm(true); }}
+                  className="w-full bg-white border border-[#DCD9CC] text-[#4A4A40] font-medium py-3 md:py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm group mb-1 text-center"
+                >
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" alt="Google Logo" referrerPolicy="no-referrer" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform"/>
+                  <span className="text-[13px] md:text-sm font-semibold">Masuk dengan Google</span>
+                </button>
+
+                <div className="flex items-center gap-3 my-1">
+                  <div className="h-px bg-[#DCD9CC] flex-1"></div>
+                  <span className="text-[11px] text-[#A5A58D] font-medium uppercase tracking-wider">atau gunakan email</span>
+                  <div className="h-px bg-[#DCD9CC] flex-1"></div>
+                </div>
+
                 <div>
                   <label className="block text-[12px] font-semibold text-[#4A4A40] mb-1.5">Email</label>
                   <input 
@@ -763,8 +792,18 @@ export default function App() {
                 </div>
                 <button 
                   onClick={() => {
-                    const user = registeredUsers.find(u => u.email === authEmail && (u.password === authPassword || !authPassword));
+                    const hashedIn = hashPassword(authPassword);
+                    const user = registeredUsers.find(u => {
+                      return u.email === authEmail && (
+                        u.password === authPassword || 
+                        u.password === hashedIn || 
+                        !authPassword ||
+                        !u.password
+                      );
+                    });
                     if (user) {
+                      const pwdToUse = user.password ? hashPassword(user.password) : "empty-google-oauth-session-key-part";
+                      SecureStorage.setUserSession(user.email, pwdToUse);
                       setCurrentUser(user);
                       setIsLoggedIn(true);
                     } else {
@@ -794,6 +833,20 @@ export default function App() {
               <h2 className="text-lg font-semibold text-[#4A4A40] mb-6">Daftar Akun Baru</h2>
               
               <div className="flex flex-col gap-4">
+                <button 
+                  onClick={() => { setLoginType("individu"); setShowLoginConfirm(true); }}
+                  className="w-full bg-white border border-[#DCD9CC] text-[#4A4A40] font-medium py-3 md:py-3.5 px-4 rounded-xl flex items-center justify-center gap-3 hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm group mb-2"
+                >
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" alt="Google Logo" referrerPolicy="no-referrer" className="w-[18px] h-[18px] group-hover:scale-110 transition-transform"/>
+                  <span className="text-[13px] md:text-sm">Daftar dengan Google (Individu)</span>
+                </button>
+
+                <div className="flex items-center gap-3">
+                  <div className="h-px bg-[#DCD9CC] flex-1"></div>
+                  <span className="text-[12px] text-[#A5A58D] font-medium">atau daftar email</span>
+                  <div className="h-px bg-[#DCD9CC] flex-1"></div>
+                </div>
+
                 <div>
                   <label className="block text-[12px] font-semibold text-[#4A4A40] mb-1.5">Nama Lengkap / Usaha</label>
                   <input 
@@ -848,7 +901,8 @@ export default function App() {
                       alert('Email atau Username sudah terdaftar. Silakan masuk atau gunakan yang lain.');
                       return;
                     }
-                    setRegisteredUsers([...registeredUsers, { email: authEmail, name: authName, username: authUsername, password: authPassword }]);
+                    const securePassword = hashPassword(authPassword);
+                    setRegisteredUsers([...registeredUsers, { email: authEmail, name: authName, username: authUsername, password: securePassword }]);
                     alert('Akun berhasil didaftar. Silakan masuk.');
                     setAuthMode("login");
                   }}
@@ -872,7 +926,7 @@ export default function App() {
                 className="bg-white p-6 rounded-2xl w-full max-w-sm shadow-2xl relative text-left"
               >
                 <div className="w-12 h-12 bg-[#E8E6DB] rounded-full flex items-center justify-center mb-4">
-                  <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google Logo" referrerPolicy="no-referrer" className="w-6 h-6"/>
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" alt="Google Logo" referrerPolicy="no-referrer" className="w-6 h-6"/>
                 </div>
                 <h3 className="text-[#4A4A40] text-lg font-bold mb-1">Pilih Akun</h3>
                 <p className="text-[13px] text-[#A5A58D] mb-4 leading-relaxed">
@@ -888,6 +942,8 @@ export default function App() {
                       onClick={() => {
                         const user = registeredUsers.find(u => u.email === acc.email);
                         if (user) {
+                          const pwdToUse = user.password ? hashPassword(user.password) : "empty-google-oauth-session-key-part";
+                          SecureStorage.setUserSession(user.email, pwdToUse);
                           setShowLoginConfirm(false);
                           setCurrentUser(user);
                           setIsLoggedIn(true);
@@ -901,8 +957,14 @@ export default function App() {
                       }}
                       className="w-full flex items-center gap-3 p-3 border border-[#DCD9CC] rounded-xl hover:bg-[#FAF9F6] hover:border-[#A5A58D] transition-colors text-left group"
                     >
-                      <div className="w-9 h-9 rounded-full bg-[#007a07] text-white flex items-center justify-center text-[11px] font-bold shrink-0 shadow-sm border border-[#006606]">
+                      <div className="w-9 h-9 rounded-full bg-[#FAF9F6] text-[#4A4A40] flex items-center justify-center text-[11px] font-bold shrink-0 shadow-sm border border-[#DCD9CC] relative">
                         {acc.avatar}
+                        <img 
+                          src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" 
+                          alt="Google Logo" 
+                          referrerPolicy="no-referrer" 
+                          className="absolute -bottom-1 -right-1 w-[16px] h-[16px] bg-white rounded-full p-[2px] border border-[#DCD9CC] shadow-sm"
+                        />
                       </div>
                       <div className="flex-1 overflow-hidden">
                         <div className="text-[13px] font-semibold text-[#4A4A40] truncate group-hover:text-[#007a07] transition-colors">{acc.name}</div>
@@ -925,16 +987,192 @@ export default function App() {
     );
   }
 
+  const focusStyles = `
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(2) { font-family: system-ui; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) { color: #ffffff; background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) { border-radius: 10px; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(1) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) { font-family: system-ui; font-weight: bold; color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(3) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(4) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(2) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(3) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(4) > div:nth-of-type(1) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(4) > div:nth-of-type(2) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(4) > div:nth-of-type(3) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > button:nth-of-type(1) { background-color: #eadede; }
+
+/* Baru */
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) { background-color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) > button:nth-of-type(1) { background-color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) > button:nth-of-type(2) { background-color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) > button:nth-of-type(3) { background-color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) > button:nth-of-type(7) { background-color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) > button:nth-of-type(11) { background-color: #fefefe; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) > button:nth-of-type(15) { background-color: #ffffff; }
+
+/* Update */
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) { border-radius: 17px; background-color: #09216c; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) { background-color: #368ccd; border-radius: 24px; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(4) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(2) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(3) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(3) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(4) > div:nth-of-type(2) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(4) > div:nth-of-type(3) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(3) > div:nth-of-type(1) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) { color: #ffffff; font-weight: bold; font-family: Arial; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(3) > div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > svg:nth-of-type(1) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(3) > div:nth-of-type(2) > div:nth-of-type(1) { font-weight: bold; font-family: Arial; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(4) > div:nth-of-type(1) > div:nth-of-type(1) { font-weight: bold; font-family: Arial; }
+
+/* Update 2 */
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) { color: #ffffff; background-color: #09216c; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) { background-color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(4) { background-color: #09216c; }
+
+/* Update 3 */
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > label:nth-of-type(1) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > label:nth-of-type(1) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(3) > label:nth-of-type(1) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(4) > label:nth-of-type(1) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > button:nth-of-type(1) { background-color: #e3d6d6; color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(5) > div:nth-of-type(1) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(5) > div:nth-of-type(2) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(6) > div:nth-of-type(1) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(6) > div:nth-of-type(2) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(7) > div:nth-of-type(2) { color: #ffffff; }
+
+/* Update 4 */
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) { background-color: #fefefe; }
+
+/* Update 5 */
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > button:nth-of-type(1) { background-color: #368ccd; color: #ffffff; }
+
+/* Update 6 */
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > h3:nth-of-type(1) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > h3:nth-of-type(1) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > span:nth-of-type(1) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > span:nth-of-type(1) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(4) > span:nth-of-type(1) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) > span:nth-of-type(2) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(2) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > span:nth-of-type(2) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(4) > span:nth-of-type(2) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(1) > span:nth-of-type(1) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(2) > span:nth-of-type(1) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(3) > span:nth-of-type(1) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(4) > span:nth-of-type(1) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(1) > span:nth-of-type(2) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(2) > span:nth-of-type(2) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(3) > span:nth-of-type(2) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(4) > span:nth-of-type(2) { color: #000000; }
+  
+/* Update 7 */
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(2) > div:nth-of-type(2) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(2) > div:nth-of-type(1) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(3) > div:nth-of-type(1) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(3) > div:nth-of-type(2) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(2) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(3) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) { background-color: #368ccd; }
+  
+/* Update 8 */
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) { background-color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(4) { background-color: #368ccd; }
+
+/* Update 9 */
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) { background-color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) { background-color: #ffffff; color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(2) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(1) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(2) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(4) { background-color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(4) > button:nth-of-type(1) { background-color: #368ccd; color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(4) > button:nth-of-type(2) { background-color: #368ccd; color: #ffffff; }
+
+/* Update 10 (Targeted style edits only) */
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) { background-color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(4) > div:nth-of-type(1) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) { background-color: #ffffff; color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) { background-color: #f5faff; color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(2) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(3) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(3) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(4) > div:nth-of-type(3) { color: #000000; }
+
+/* Update 11 (Targeted style edits only) */
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) { color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) { background-color: #368ccd; }
+
+/* Update 12 (Targeted style edits only) */
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) { background-color: #368ccd; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) { color: #ffffff; }
+
+/* Update 13 (Targeted style edits only) */
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) { background-color: #ffffff; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(2) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(3) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(3) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(4) > div:nth-of-type(3) { color: #000000; }
+div#root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) { background-color: #09216c; }
+  `;
+
   return (
     <div className="font-sans text-[#4A4A40] min-h-screen bg-[#FAF9F6] flex flex-col">
+      <style>{focusStyles}</style>
       <AiAssistant txns={txns} setTxns={setTxns} catsMasuk={CAT_MASUK} catsKeluar={CAT_KELUAR} onExport={exportCSV} />
       {/* ── Header ─────────────────────────────── */}
-      <div className="bg-[#007a07] border-b border-[#DCD9CC] px-4 py-3 md:px-5 md:py-3.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-0 sticky top-0 z-20">
+      <div className="border-b border-[#DCD9CC] px-4 py-3 md:px-5 md:py-3.5 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-0 sticky top-0 z-20" style={{ backgroundColor: "#09216c" }}>
         <div>
           <div className="flex items-center gap-2">
-            <div className="text-white font-bold text-base tracking-[-0.3px]">myAkuntansi</div>
+            <div className="text-white font-bold text-base tracking-[-0.3px]" style={{ fontFamily: "system-ui" }}>myAkuntansi</div>
             {currentUser && (
-              <div className="bg-[#125927] text-white px-2 py-0.5 rounded text-[10px] uppercase tracking-wider border border-[#007a07]">
+              <div 
+                className="text-white px-2 py-0.5 rounded text-[10px] uppercase tracking-wider border border-[#007a07]"
+                style={{
+                  backgroundColor: "#000765",
+                  fontWeight: "bold",
+                  fontStyle: "normal",
+                  textDecorationLine: "none",
+                  fontFamily: "Arial"
+                }}
+              >
                 {currentUser.username}
               </div>
             )}
@@ -973,18 +1211,19 @@ export default function App() {
       </div>
 
       {/* ── Nav ─────────────────────────────── */}
-      <div className="flex overflow-x-auto bg-[#ad9e6d] border-b-[0.5px] border-[#DCD9CC] sticky top-[72px] md:top-[60px] z-10 no-scrollbar">
-        {TABS.map(t => (
+      <div className="flex overflow-x-auto border-b-[0.5px] border-[#DCD9CC] sticky top-[72px] md:top-[60px] z-10 no-scrollbar" style={{ backgroundColor: "#368ccd" }}>
+        {TABS.map((t, i) => (
           <button 
             key={t.id} 
             className={`whitespace-nowrap px-4 py-2.5 md:px-[18px] md:py-[11px] text-[13px] border-none bg-transparent cursor-pointer transition-colors ${tab === t.id ? 'font-semibold text-white border-b-2 border-white' : 'font-normal text-white/80 hover:text-white border-b-2 border-transparent'}`}
+            style={i === 0 ? { textAlign: "center", height: "41.5px", lineHeight: "19.5px", fontSize: "13px", fontWeight: "bold" } : { fontWeight: "bold" }}
             onClick={() => setTab(t.id)}>
             {t.icon} {t.label}
           </button>
         ))}
       </div>
 
-      <div className="p-3 md:p-5 flex-1">
+      <div className="p-3 md:p-5 flex-1" style={{ backgroundColor: "#09216c" }}>
 
         {/* ══════════════════════════════ DASHBOARD ══════════════════════════════ */}
         {tab === "dashboard" && (
@@ -997,8 +1236,8 @@ export default function App() {
                 { label: "Laba Bersih", val: fmtS(laba), color: laba >= 0 ? "#6B705C" : "#B18B5E", sub: `Margin ${margin}%`, subColor: laba >= 0 ? "#6B705C" : "#B18B5E" },
                 { label: "Total Transaksi", val: txns.length, color: "#4A4A40", sub: "Periode ini", subColor: "#A5A58D" },
               ].map((m, i) => (
-                <div key={i} className="bg-[#dad2c6] text-[#6b705c] rounded-[16px] md:rounded-[24px] p-3.5 md:p-4 border border-[#DCD9CC]">
-                  <div className="text-[10px] md:text-[11px] text-[#A5A58D] mb-1 tracking-[0.3px] uppercase">{m.label}</div>
+                <div key={i} className="rounded-[16px] md:rounded-[24px] p-3.5 md:p-4 border border-[#DCD9CC]" style={{ backgroundColor: "#ffffff" }}>
+                  <div className="text-[10px] md:text-[11px] text-[#A5A58D] mb-1 tracking-[0.3px] uppercase font-bold" style={{ fontWeight: "bold" }}>{m.label}</div>
                   <div className="text-lg md:text-[20px] font-semibold tracking-[-0.5px]" style={{ color: m.color }}>{m.val}</div>
                   <div className="text-[10px] md:text-[11px] mt-1.5 font-medium" style={{ color: m.subColor }}>{m.sub}</div>
                 </div>
@@ -1007,7 +1246,7 @@ export default function App() {
 
             {/* Line Chart — Arus Kas */}
             <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm mb-4">
-              <div className="text-sm md:text-base font-semibold mb-3 text-[#4A4A40]">Grafik Arus Kas Harian — {filterMonth ? new Date(filterMonth + "-01").toLocaleDateString('id-ID', { year: 'numeric', month: 'long' }) : "Semua Periode"}</div>
+              <div className="text-sm md:text-base font-semibold mb-3 text-[#4A4A40]" style={{ fontFamily: "Arial" }}>Grafik Arus Kas Harian — {filterMonth ? new Date(filterMonth + "-01").toLocaleDateString('id-ID', { year: 'numeric', month: 'long' }) : "Semua Periode"}</div>
               <div className="flex flex-wrap gap-4 mb-3">
                 {[["#6B705C","Pemasukan"],["#B18B5E","Pengeluaran"]].map(([col, lbl]) => (
                   <span key={lbl} className="flex items-center gap-1.5 text-[11px] md:text-[12px] text-[#A5A58D]">
@@ -1112,8 +1351,8 @@ export default function App() {
         {tab === "transaksi" && (
           <div className="flex flex-col lg:flex-row gap-4 md:gap-5">
             {/* Form Panel */}
-            <div className="w-full lg:w-[320px] shrink-0 self-start bg-[#125927] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm border border-[#DCD9CC]">
-              <div className="text-white text-base font-semibold mb-4 text-[#fff]">Tambah Transaksi Baru</div>
+            <div className="w-full lg:w-[320px] shrink-0 self-start rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm border border-[#DCD9CC]" style={{ backgroundColor: "#ffffff", fontFamily: "Arial" }}>
+              <div className="text-[#4A4A40] text-base font-semibold mb-4" style={{ fontFamily: "Arial" }}>Tambah Transaksi Baru</div>
 
               {msg && (
                 <div className={`px-3 py-2.5 rounded-lg text-xs mb-3 border ${msg.ok ? "bg-[#E8E6DB] text-[#6B705C] border-[#DCD9CC]" : "bg-[#F0EEE4] text-[#B18B5E] border-[#DCD9CC]"}`}>
@@ -1123,18 +1362,24 @@ export default function App() {
 
               {/* Type Toggle */}
               <div className="mb-4">
-                <div className="text-[11px] text-white mb-1.5 tracking-[0.3px] uppercase opacity-90">Jenis Transaksi</div>
+                <div className="text-[11px] text-[#6B705C] mb-1.5 tracking-[0.3px] uppercase opacity-90 font-semibold">Jenis Transaksi</div>
                 <div className="flex gap-2">
-                  {[["masuk","Pemasukan","↑","#6B705C"],["keluar","Pengeluaran","↓","#B18B5E"]].map(([val, lbl, arrow, col]) => (
-                    <button key={val} onClick={() => setForm(f => ({ ...f, type: val, cat: "" }))}
-                      className={`flex-1 py-2 rounded-lg border-[1.5px] font-medium text-[13px] cursor-pointer transition-all ${
-                        form.type === val 
-                          ? (val === "masuk" ? "border-[#6B705C] bg-[#6B705C]/10 text-white font-semibold" : "border-[#B18B5E] bg-[#B18B5E]/10 text-[#B18B5E] font-semibold") 
-                          : "border-[#DCD9CC] bg-white text-[#A5A58D]"
-                      }`}>
-                      {arrow} {lbl}
-                    </button>
-                  ))}
+                  <button 
+                    onClick={() => setForm(f => ({ ...f, type: "masuk", cat: "" }))}
+                    className="flex-1 py-1.5 rounded-lg border-[1.5px] text-white font-semibold text-[13px] cursor-pointer transition-all"
+                    style={{ borderColor: form.type === "masuk" ? "#368ccd" : "#DCD9CC", backgroundColor: "#368ccd" }}>
+                    ↑ Pemasukan
+                  </button>
+                  <button 
+                    onClick={() => setForm(f => ({ ...f, type: "keluar", cat: "" }))}
+                    className={`flex-1 py-1.5 rounded-lg border-[1.5px] font-medium text-[13px] cursor-pointer transition-all ${
+                      form.type === "keluar" 
+                        ? "text-white font-semibold" 
+                        : "border-[#DCD9CC] bg-white text-[#A5A58D]"
+                    }`}
+                    style={form.type === "keluar" ? { backgroundColor: "#368ccd", borderColor: "#368ccd" } : {}}>
+                    ↓ Pengeluaran
+                  </button>
                 </div>
               </div>
 
@@ -1159,13 +1404,13 @@ export default function App() {
                 )},
               ].map(({ label, el }) => (
                 <div key={label} className="mb-3">
-                  <div className="text-[11px] text-white mb-1.5 tracking-[0.3px] uppercase opacity-90">{label}</div>
+                  <div className="text-[11px] text-[#6B705C] mb-1.5 tracking-[0.3px] uppercase opacity-90 font-semibold">{label}</div>
                   {el}
                 </div>
               ))}
 
               <div className="flex gap-2 mt-1">
-                <button onClick={addTxn} className={`flex-1 py-2.5 rounded-lg border-none text-white font-semibold text-[13px] cursor-pointer transition-colors ${editId ? "bg-[#B18B5E] hover:bg-[#a07c52]" : "bg-[#367609] hover:bg-[#2e6408]"}`}>
+                <button onClick={addTxn} className="flex-1 py-2.5 rounded-lg border-none text-white font-semibold text-[13px] cursor-pointer transition-colors" style={{ backgroundColor: "#5194ff" }}>
                   {editId ? "✓ Simpan Perubahan" : "+ Simpan Transaksi"}
                 </button>
                 {editId && (
@@ -1176,17 +1421,17 @@ export default function App() {
               </div>
 
               {/* Mini summary */}
-              <div className="mt-5 pt-4 border-t border-dashed border-white/30">
-                <div className="text-[11px] text-white mb-1 tracking-[0.3px] uppercase opacity-90">Saldo Saat Ini</div>
-                <div className={`text-xl md:text-2xl font-bold tracking-[-0.5px] ${saldoAkhir >= 0 ? "text-white" : "text-[#ffb0b0]"}`}>{fmtS(saldoAkhir)}</div>
-                <div className="flex justify-between mt-3 bg-white/10 p-3 rounded-lg">
+              <div className="mt-5 pt-4 border-t border-dashed border-[#DCD9CC]">
+                <div className="text-[11px] text-[#6B705C] mb-1 tracking-[0.3px] uppercase opacity-90 font-semibold">Saldo Saat Ini</div>
+                <div className={`text-xl md:text-2xl font-bold tracking-[-0.5px] ${saldoAkhir >= 0 ? "text-[#007a07]" : "text-[#B18B5E]"}`} style={{ color: "#000000" }}>{fmtS(saldoAkhir)}</div>
+                <div className="flex justify-between mt-3 bg-[#FAF9F6] border border-[#DCD9CC] p-3 rounded-lg">
                   <div>
-                    <div className="text-[10px] text-white/70 uppercase mb-0.5">Total Masuk</div>
-                    <div className="text-[13px] font-semibold text-white">{fmtS(totalMasuk)}</div>
+                    <div className="text-[10px] text-[#A5A58D] uppercase mb-0.5 font-medium">Total Masuk</div>
+                    <div className="text-[13px] font-semibold text-[#007a07]" style={{ color: "#000000" }}>{fmtS(totalMasuk)}</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-[10px] text-white/70 uppercase mb-0.5">Total Keluar</div>
-                    <div className="text-[13px] font-semibold text-[#ffb0b0]">{fmtS(totalKeluar)}</div>
+                    <div className="text-[10px] text-[#A5A58D] uppercase mb-0.5 font-medium">Total Keluar</div>
+                    <div className="text-[13px] font-semibold text-[#B18B5E]">{fmtS(totalKeluar)}</div>
                   </div>
                 </div>
               </div>
@@ -1194,13 +1439,13 @@ export default function App() {
 
             {/* Transaction List */}
             <div className="flex-1 min-w-0 relative bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm overflow-hidden flex flex-col">
-              <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-4 md:mb-6 pb-4 border-b border-[#DCD9CC] gap-3 md:gap-0">
-                <div className="text-base font-semibold text-[#4A4A40]">Riwayat Transaksi ({filteredTxns.length})</div>
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-4 md:mb-6 pb-4 border-b border-[#DCD9CC] gap-3 md:gap-0" style={{ backgroundColor: "#ffffff" }}>
+                <div className="text-base font-semibold text-[#4A4A40]" style={{ color: "#000000" }}>Riwayat Transaksi ({filteredTxns.length})</div>
                 <div className="flex flex-wrap gap-2 md:gap-4 items-center">
-                  <button onClick={exportCSV} className="py-2 px-3 md:px-4 rounded-lg border border-[#A5A58D] bg-[#007a07] text-white text-[12px] md:text-[13px] font-semibold cursor-pointer transition-colors flex items-center gap-1.5 hover:bg-[#006606]">
+                  <button onClick={exportCSV} className="py-2 px-3 md:px-4 rounded-lg border border-[#A5A58D] text-white text-[12px] md:text-[13px] font-semibold cursor-pointer transition-colors flex items-center gap-1.5" style={{ backgroundColor: "#5194ff" }}>
                     📥 Ekspor CSV
                   </button>
-                  <div className="flex gap-1.5 bg-[#DCD9CC] p-1 rounded-lg">
+                  <div className="flex gap-1.5 p-1 rounded-lg" style={{ color: "#000000", backgroundColor: "#ffffff" }}>
                     {[["semua","Semua"],["masuk","Masuk"],["keluar","Keluar"]].map(([val, lbl]) => (
                       <button key={val} onClick={() => setFilterType(val)} 
                         className={`py-1.5 px-3 md:px-3.5 rounded-md border-none text-[11px] md:text-[12px] cursor-pointer transition-all ${filterType === val ? "bg-white text-[#4A4A40] font-semibold shadow-sm" : "bg-transparent text-[#A5A58D] font-medium hover:text-[#4A4A40]"}`}>
@@ -1211,16 +1456,16 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto overflow-x-auto min-h-[300px] pr-1 md:pr-2">
+              <div className="flex-1 overflow-y-auto overflow-x-auto min-h-[300px] pr-1 md:pr-2" style={{ backgroundColor: "#ffffff" }}>
                 <table className="w-full border-collapse text-[12px] md:text-[13px] text-left whitespace-nowrap md:whitespace-normal">
                   <thead className="sticky top-0 bg-[#FAF9F6] z-10 shadow-[0_1px_0_#DCD9CC]">
                     <tr>
-                      <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold md:w-[15%]">Tanggal</th>
-                      <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold md:w-[35%] whitespace-normal">Keterangan</th>
-                      <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-right">Debet (Masuk)</th>
-                      <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-right">Kredit (Keluar)</th>
-                      <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-center w-[60px]">Aksi</th>
-                      {filterType === 'semua' && <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-right">Saldo</th>}
+                      <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold md:w-[15%]" style={{ backgroundColor: "#5194ff", fontFamily: "Verdana", color: "#ffffff", textAlign: "center" }}>Tanggal</th>
+                      <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold md:w-[35%] whitespace-normal" style={{ backgroundColor: "#5194ff", fontFamily: "Verdana", color: "#ffffff", textAlign: "center" }}>Keterangan</th>
+                      <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-right" style={{ backgroundColor: "#5194ff", fontFamily: "Verdana", color: "#ffffff", textAlign: "center" }}>Debet (Masuk)</th>
+                      <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-right" style={{ backgroundColor: "#5194ff", fontFamily: "Verdana", color: "#ffffff", textAlign: "center" }}>Kredit (Keluar)</th>
+                      <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-center w-[60px]" style={{ backgroundColor: "#5194ff", fontFamily: "Verdana", color: "#ffffff" }}>Aksi</th>
+                      {filterType === 'semua' && <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-right" style={{ backgroundColor: "#5194ff", fontSize: "12px", fontFamily: "Verdana", color: "#ffffff", paddingLeft: "13px", paddingBottom: "10px", textAlign: "center" }}>Saldo</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -1231,10 +1476,10 @@ export default function App() {
                     ) : (
                       filteredTxns.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((t, index) => (
                         <tr key={t.id} className={`border-b border-[#E8E6DB] ${index % 2 === 0 ? 'bg-white' : 'bg-[#FAF9F6]'} hover:bg-gray-50`}>
-                          <td className="py-3 px-3 md:px-4 text-[#4A4A40]">{new Date(t.date).toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}</td>
+                          <td className="py-3 px-3 md:px-4 text-[#4A4A40]" style={{ backgroundColor: "#ffffff" }}>{new Date(t.date).toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}</td>
                           <td className="py-3 px-3 md:px-4">
-                            <div className="font-medium text-[#4A4A40] w-32 sm:w-auto truncate md:whitespace-normal xl:line-clamp-2">{t.desc}</div>
-                            <div className="text-[11px] text-[#A5A58D] mt-1">{t.cat}</div>
+                            <div className="font-medium text-[#4A4A40] w-32 sm:w-auto truncate md:whitespace-normal xl:line-clamp-2" style={{ color: "#000000" }}>{t.desc}</div>
+                            <div className="text-[11px] text-[#A5A58D] mt-1" style={{ color: "#000000" }}>{t.cat}</div>
                           </td>
                           <td className="py-3 px-3 md:px-4 text-right font-medium text-[#6B705C]">
                             {t.type === 'masuk' ? fmt(t.amount) : '-'}
@@ -1293,15 +1538,15 @@ export default function App() {
         {/* ══════════════════════════════ HUTANG PIUTANG ══════════════════════════════ */}
         {tab === "hutang_piutang" && (
           <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm">
-            <div className="text-base font-semibold mb-4 text-[#4A4A40]">Manajemen Hutang & Piutang</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              <div className="border border-[#DCD9CC] bg-[#FAF9F6] p-4 rounded-xl">
+            <div className="text-base font-semibold mb-4 text-[#4A4A40]" style={{ fontFamily: "Arial" }}>Manajemen Hutang & Piutang</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6" style={{ backgroundColor: "#ffffff" }}>
+              <div className="border border-[#DCD9CC] p-4 rounded-xl" style={{ backgroundColor: "#ffffff" }}>
                 <div className="text-[12px] font-bold text-[#A5A58D] mb-1">TOTAL PIUTANG (A/R) - BELUM LUNAS</div>
                 <div className="text-[20px] font-bold text-[#4A4A40]">{fmt(debts.filter(d => d.type === 'piutang' && d.status === 'belum').reduce((a,b)=>a+b.amount,0))}</div>
               </div>
-              <div className="border border-[#DCD9CC] bg-[#FAF9F6] p-4 rounded-xl">
+              <div className="border border-[#DCD9CC] p-4 rounded-xl" style={{ backgroundColor: "#ffffff" }}>
                 <div className="text-[12px] font-bold text-[#A5A58D] mb-1">TOTAL HUTANG (A/P) - BELUM LUNAS</div>
-                <div className="text-[20px] font-bold text-[#B18B5E]">{fmt(debts.filter(d => d.type === 'hutang' && d.status === 'belum').reduce((a,b)=>a+b.amount,0))}</div>
+                <div className="text-[20px] font-bold" style={{ color: "#000000" }}>{fmt(debts.filter(d => d.type === 'hutang' && d.status === 'belum').reduce((a,b)=>a+b.amount,0))}</div>
               </div>
             </div>
 
@@ -1309,12 +1554,12 @@ export default function App() {
               <table className="w-full text-left border-collapse min-w-[600px]">
                 <thead>
                   <tr className="bg-[#E8E6DB]">
-                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Nama / Pihak</th>
-                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Jenis</th>
-                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Jatuh Tempo</th>
-                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Nominal</th>
-                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Status</th>
-                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Aksi</th>
+                    <th className="p-3 text-[12px] font-semibold border-b border-[#DCD9CC]" style={{ textAlign: "center", backgroundColor: "#368ccd", color: "#ffffff" }}>Nama / Pihak</th>
+                    <th className="p-3 text-[12px] font-semibold border-b border-[#DCD9CC]" style={{ textAlign: "center", backgroundColor: "#368ccd", color: "#ffffff" }}>Jenis</th>
+                    <th className="p-3 text-[12px] font-semibold border-b border-[#DCD9CC]" style={{ textAlign: "center", backgroundColor: "#368ccd", color: "#ffffff" }}>Jatuh Tempo</th>
+                    <th className="p-3 text-[12px] font-semibold border-b border-[#DCD9CC]" style={{ textAlign: "center", backgroundColor: "#368ccd", color: "#ffffff" }}>Nominal</th>
+                    <th className="p-3 text-[12px] font-semibold border-b border-[#DCD9CC]" style={{ textAlign: "center", backgroundColor: "#368ccd", color: "#ffffff" }}>Status</th>
+                    <th className="p-3 text-[12px] font-semibold border-b border-[#DCD9CC]" style={{ textAlign: "center", backgroundColor: "#368ccd", color: "#ffffff" }}>Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white">
@@ -1411,22 +1656,22 @@ export default function App() {
         {/* ══════════════════════════════ INVENTORI ══════════════════════════════ */}
         {tab === "inventori" && (
           <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm">
-            <div className="text-base font-semibold mb-4 text-[#4A4A40]">Manajemen Stok / Inventori</div>
-            <div className="border border-[#DCD9CC] bg-[#E8E6DB] p-4 rounded-xl mb-6">
-              <div className="text-[12px] font-bold text-[#4A4A40] mb-1">TOTAL NILAI PERSEDIAAN (COGS)</div>
-              <div className="text-[20px] font-bold text-[#6B705C]">{fmt(inventory.reduce((a,b) => a + (b.cogs * b.qty), 0))}</div>
+            <div className="text-base font-semibold mb-4 text-[#4A4A40]" style={{ fontFamily: "Arial" }}>Manajemen Stok / Inventori</div>
+            <div className="border border-[#DCD9CC] p-4 rounded-xl mb-6" style={{ backgroundColor: "#368ccd" }}>
+              <div className="text-[12px] font-bold mb-1" style={{ color: "#ffffff" }}>TOTAL NILAI PERSEDIAAN (COGS)</div>
+              <div className="text-[20px] font-bold" style={{ color: "#ffffff" }}>{fmt(inventory.reduce((a,b) => a + (b.cogs * b.qty), 0))}</div>
             </div>
 
             <div className="overflow-x-auto rounded-xl border border-[#DCD9CC]">
               <table className="w-full text-left border-collapse min-w-[600px]">
                 <thead>
                   <tr className="bg-[#E8E6DB]">
-                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Nama Barang</th>
-                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Stok (Qty)</th>
-                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Harga Jual/pcs</th>
-                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">HPP (COGS)/pcs</th>
-                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC] text-right">Nilai Total</th>
-                    <th className="p-3 text-[12px] font-semibold text-[#4A4A40] border-b border-[#DCD9CC]">Aksi</th>
+                    <th className="p-3 text-[12px] font-semibold border-b border-[#DCD9CC]" style={{ backgroundColor: "#368ccd", textAlign: "center", color: "#ffffff" }}>Nama Barang</th>
+                    <th className="p-3 text-[12px] font-semibold border-b border-[#DCD9CC]" style={{ color: "#ffffff", backgroundColor: "#368ccd", textAlign: "center" }}>Stok (Qty)</th>
+                    <th className="p-3 text-[12px] font-semibold border-b border-[#DCD9CC]" style={{ backgroundColor: "#368ccd", color: "#ffffff", textAlign: "center" }}>Harga Jual/pcs</th>
+                    <th className="p-3 text-[12px] font-semibold border-b border-[#DCD9CC]" style={{ backgroundColor: "#368ccd", color: "#ffffff", textAlign: "center" }}>HPP (COGS)/pcs</th>
+                    <th className="p-3 text-[12px] font-semibold border-b border-[#DCD9CC]" style={{ color: "#ffffff", backgroundColor: "#368ccd", textAlign: "center" }}>Nilai Total</th>
+                    <th className="p-3 text-[12px] font-semibold border-b border-[#DCD9CC]" style={{ color: "#ffffff", backgroundColor: "#368ccd", textAlign: "center" }}>Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white">
@@ -1483,7 +1728,8 @@ export default function App() {
             <div className="mt-4">
               <button 
                 onClick={() => setInventory([...inventory, { id: Date.now(), name: 'Produk Baru (Contoh)', qty: 10, price: 150000, cogs: 80000 }])}
-                className="py-2 px-4 rounded-xl border border-[#DCD9CC] bg-[#FAF9F6] text-[#4A4A40] text-[12px] font-semibold hover:bg-white transition-colors">
+                className="py-2 px-4 rounded-xl border border-[#DCD9CC] bg-[#FAF9F6] text-[12px] font-semibold hover:bg-white transition-colors"
+                style={{ backgroundColor: "#368ccd", color: "#ffffff" }}>
                 + Tambah Barang
               </button>
             </div>
@@ -1512,7 +1758,8 @@ export default function App() {
               </div>
               <button 
                 onClick={exportFullReport}
-                className="py-1.5 md:py-2 px-3 md:px-4 rounded-lg border border-[#A5A58D] bg-[#007a07] text-white text-[12px] md:text-[13px] font-semibold cursor-pointer transition-colors flex items-center gap-1.5 hover:bg-[#006606]"
+                className="py-1.5 md:py-2 px-3 md:px-4 rounded-lg border border-[#A5A58D] text-white text-[12px] md:text-[13px] font-semibold cursor-pointer transition-colors flex items-center gap-1.5 hover:bg-[#286f99]"
+                style={{ backgroundColor: "#368ccd" }}
               >
                 💾 Simpan Catatan
               </button>
@@ -1523,12 +1770,12 @@ export default function App() {
               <>
             {/* P&L Summary */}
             <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm mb-4 print:shadow-none print:border-none print:m-0 print:p-0">
-              <div className="text-sm md:text-base font-semibold mb-4 text-[#4A4A40]">Laporan Laba Rugi — {filterMonth ? filterMonth : "Semua Periode"}</div>
+              <div className="text-sm md:text-base font-semibold mb-4 text-[#4A4A40]" style={{ fontFamily: "Arial", fontWeight: "bold" }}>Laporan Laba Rugi — {filterMonth ? new Date(filterMonth + "-01").toLocaleDateString('id-ID', { year: 'numeric', month: 'long' }) : "Semua Periode"}</div>
               <div className="flex flex-col lg:grid lg:grid-cols-[1fr_1fr_260px] gap-6">
 
                 {/* Pendapatan */}
                 <div>
-                  <div className="text-[11px] text-[#6B705C] font-bold mb-3 tracking-[0.5px]">PENDAPATAN</div>
+                  <div className="text-[11px] text-[#6B705C] font-bold mb-3 tracking-[0.5px]" style={{ color: "#007604", fontSize: "13px" }}>PENDAPATAN</div>
                   <div className="bg-[#FAF9F6] rounded-lg p-2.5 px-3 border border-[#DCD9CC]">
                   {pieMasuk.map((d, i) => (
                     <div key={i} className={`flex justify-between text-[13px] py-2 ${i < pieMasuk.length-1 ? "border-b border-dashed border-[#DCD9CC]" : ""}`}>
@@ -1539,13 +1786,13 @@ export default function App() {
                   {pieMasuk.length === 0 && <div className="text-[12px] text-[#A5A58D] py-1">Belum ada data</div>}
                   </div>
                   <div className="flex justify-between text-[13px] md:text-[14px] font-bold mt-3 text-[#6B705C] px-1">
-                    <span>Total Pendapatan</span><span>{fmt(totalMasuk)}</span>
+                    <span style={{ fontFamily: "Arial", color: "#000000" }}>Total Pendapatan</span><span>{fmt(totalMasuk)}</span>
                   </div>
                 </div>
 
                 {/* Pengeluaran */}
                 <div>
-                  <div className="text-[11px] text-[#B18B5E] font-bold mb-3 tracking-[0.5px]">PENGELUARAN</div>
+                  <div className="text-[11px] text-[#B18B5E] font-bold mb-3 tracking-[0.5px]" style={{ color: "#8e0000", fontSize: "13px" }}>PENGELUARAN</div>
                   <div className="bg-[#FAF9F6] rounded-lg p-2.5 px-3 border border-[#DCD9CC]">
                   {pieKeluar.map((d, i) => (
                     <div key={i} className={`flex justify-between text-[13px] py-2 ${i < pieKeluar.length-1 ? "border-b border-dashed border-[#DCD9CC]" : ""}`}>
@@ -1556,25 +1803,25 @@ export default function App() {
                   {pieKeluar.length === 0 && <div className="text-[12px] text-[#A5A58D] py-1">Belum ada data</div>}
                   </div>
                   <div className="flex justify-between text-[13px] md:text-[14px] font-bold mt-3 text-[#B18B5E] px-1">
-                    <span>Total Pengeluaran</span><span>{fmt(totalKeluar)}</span>
+                    <span style={{ color: "#000000", fontFamily: "Arial" }}>Total Pengeluaran</span><span style={{ color: "#8e0000" }}>{fmt(totalKeluar)}</span>
                   </div>
                 </div>
 
                 {/* Ringkasan Box */}
-                <div className={`rounded-xl p-5 ${laba >= 0 ? "bg-[#E8E6DB]" : "bg-[#F0EEE4]"}`}>
-                  <div className={`text-[11px] font-bold mb-4 tracking-[0.5px] ${laba >= 0 ? "text-[#6B705C]" : "text-[#B18B5E]"}`}>RINGKASAN L/R</div>
+                <div className={`rounded-xl p-5 ${laba >= 0 ? "bg-[#E8E6DB]" : "bg-[#F0EEE4]"}`} style={{ backgroundColor: "#ffffff" }}>
+                  <div className={`text-[11px] font-bold mb-4 tracking-[0.5px] ${laba >= 0 ? "text-[#6B705C]" : "text-[#B18B5E]"}`} style={{ color: "#000000", fontFamily: "system-ui" }}>RINGKASAN L/R</div>
                   {[
                     { lbl: "Pendapatan", val: fmt(totalMasuk), col: "text-[#6B705C]" },
                     { lbl: "Pengeluaran", val: fmt(totalKeluar), col: "text-[#B18B5E]" },
                   ].map(m => (
                     <div key={m.lbl} className="flex justify-between mb-2 items-center">
-                      <div className="text-[12px] text-[#A5A58D]">{m.lbl}</div>
-                      <div className={`text-[13px] font-semibold ${m.col}`}>{m.val}</div>
+                      <div className="text-[12px] text-[#A5A58D]" style={m.lbl === "Pendapatan" ? { color: "#007604" } : m.lbl === "Pengeluaran" ? { color: "#8e0000" } : undefined}>{m.lbl}</div>
+                      <div className={`text-[13px] font-semibold ${m.col}`} style={m.lbl === "Pendapatan" ? { color: "#007604" } : m.lbl === "Pengeluaran" ? { color: "#8e0000" } : undefined}>{m.val}</div>
                     </div>
                   ))}
                   <div className={`pt-4 mt-3 border-t ${laba >= 0 ? "border-[#A5A58D]" : "border-[#DCD9CC]"}`}>
-                    <div className="text-[12px] text-[#A5A58D] mb-1">Laba Bersih</div>
-                    <div className={`text-[20px] md:text-[24px] font-bold tracking-[-0.5px] ${laba >= 0 ? "text-[#6B705C]" : "text-[#B18B5E]"}`}>{fmt(laba)}</div>
+                    <div className="text-[12px] text-[#A5A58D] mb-1" style={{ color: "#000000" }}>Laba Bersih</div>
+                    <div className={`text-[20px] md:text-[24px] font-bold tracking-[-0.5px] ${laba >= 0 ? "text-[#6B705C]" : "text-[#B18B5E]"}`} style={{ color: "#000000" }}>{fmt(laba)}</div>
                     <div className="flex gap-2 mt-3 flex-wrap">
                       <div className={`rounded-md px-2 py-1 text-[11px] font-semibold border ${laba >= 0 ? "bg-[#DCD9CC] text-[#6B705C] border-[#DCD9CC]" : "bg-[#F0EEE4] text-[#B18B5E] border-[#DCD9CC]"}`}>
                         Margin {margin}%
@@ -1589,30 +1836,30 @@ export default function App() {
             </div>
 
             {/* Laporan Arus Kas */}
-            <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm mb-4">
-              <div className="text-sm md:text-base font-semibold mb-3 text-[#4A4A40]">Laporan Arus Kas — {filterMonth ? filterMonth : "Semua Periode"}</div>
-              <div className="bg-[#FAF9F6] rounded-xl p-4 md:p-5 border border-[#DCD9CC] overflow-x-auto">
+            <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm mb-4" style={{ backgroundColor: "#368ccd" }}>
+              <div className="text-sm md:text-base font-semibold mb-3 text-[#4A4A40]" style={{ color: "#000000", fontFamily: "Arial" }}>Laporan Arus Kas — {filterMonth ? new Date(filterMonth + "-01").toLocaleDateString('id-ID', { year: 'numeric', month: 'long' }) : "Semua Periode"}</div>
+              <div className="bg-[#FAF9F6] rounded-xl p-4 md:p-5 border border-[#DCD9CC] overflow-x-auto" style={{ backgroundColor: "#ffffff" }}>
                 <table className="w-full border-collapse text-[13px] md:text-[14px]">
                   <tbody>
                     <tr className="border-b border-transparent">
-                      <td className="py-2.5 md:py-3 text-[#6B705C] font-semibold whitespace-nowrap min-w-[200px]">Arus Kas Masuk (Penerimaan)</td>
-                      <td className="py-2.5 md:py-3 text-right font-semibold text-[#6B705C]">{fmt(totalMasuk)}</td>
+                      <td className="py-2.5 md:py-3 text-[#6B705C] font-semibold whitespace-nowrap min-w-[200px]" style={{ color: "#007604" }}>Arus Kas Masuk (Penerimaan)</td>
+                      <td className="py-2.5 md:py-3 text-right font-semibold text-[#6B705C]" style={{ color: "#007604" }}>{fmt(totalMasuk)}</td>
                     </tr>
                     <tr>
                       <td className="pb-3 pl-4 text-[#A5A58D] text-[12px] md:text-[13px] whitespace-normal">Dari Pendapatan Operasional & Lainnya</td>
                       <td className="pb-3 text-right text-[#A5A58D] text-[12px] md:text-[13px]">{fmt(totalMasuk)}</td>
                     </tr>
                     <tr className="border-t border-dashed border-[#DCD9CC]">
-                      <td className="py-2.5 md:py-3 text-[#B18B5E] font-semibold whitespace-nowrap min-w-[200px]">Arus Kas Keluar (Pengeluaran)</td>
-                      <td className="py-2.5 md:py-3 text-right font-semibold text-[#B18B5E]">{fmt(totalKeluar)}</td>
+                      <td className="py-2.5 md:py-3 text-[#B18B5E] font-semibold whitespace-nowrap min-w-[200px]" style={{ color: "#8e0000" }}>Arus Kas Keluar (Pengeluaran)</td>
+                      <td className="py-2.5 md:py-3 text-right font-semibold text-[#B18B5E]" style={{ color: "#8e0000" }}>{fmt(totalKeluar)}</td>
                     </tr>
                     <tr>
                       <td className="pb-3 pl-4 text-[#A5A58D] text-[12px] md:text-[13px] whitespace-normal">Untuk Pembayaran Operasional & Kas</td>
                       <td className="pb-3 text-right text-[#A5A58D] text-[12px] md:text-[13px]">{fmt(totalKeluar)}</td>
                     </tr>
                     <tr className="border-t-2 border-[#DCD9CC]">
-                      <td className="py-3.5 md:py-4 text-[#4A4A40] font-bold text-[14px] md:text-[16px]">Kenaikan/Penurunan Kas Bersih</td>
-                      <td className={`py-3.5 md:py-4 text-right font-bold text-[14px] md:text-[16px] ${laba >= 0 ? "text-[#6B705C]" : "text-[#B18B5E]"}`}>{fmt(laba)}</td>
+                      <td className="py-3.5 md:py-4 text-[#4A4A40] font-bold text-[14px] md:text-[16px]" style={{ color: "#000000" }}>Kenaikan/Penurunan Kas Bersih</td>
+                      <td className={`py-3.5 md:py-4 text-right font-bold text-[14px] md:text-[16px] ${laba >= 0 ? "text-[#6B705C]" : "text-[#B18B5E]"}`} style={{ color: "#000000" }}>{fmt(laba)}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -1621,11 +1868,11 @@ export default function App() {
 
             {/* Bar Chart Comparison */}
             <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm">
-              <div className="text-sm md:text-base font-semibold mb-3 text-[#4A4A40]">Pemasukan vs Pengeluaran per Hari</div>
+              <div className="text-sm md:text-base font-semibold mb-3 text-[#4A4A40]" style={{ fontFamily: "Arial", fontWeight: "bold" }}>Pemasukan vs Pengeluaran per Hari</div>
               <div className="flex gap-4 mb-3">
                 {[["#6B705C","Pemasukan"],["#B18B5E","Pengeluaran"]].map(([col, lbl]) => (
                   <span key={lbl} className="flex items-center gap-1.5 text-[11px] md:text-[12px] text-[#A5A58D]">
-                    <span className="w-3 h-3 rounded-[3px]" style={{ background: col }}></span>{lbl}
+                    <span className="w-3 h-3 rounded-[3px]" style={lbl === "Pemasukan" ? { backgroundColor: "#007604" } : lbl === "Pengeluaran" ? { backgroundColor: "#8e0000" } : { background: col }}></span>{lbl}
                   </span>
                 ))}
               </div>
@@ -1645,18 +1892,18 @@ export default function App() {
 
             {/* Rasio Keuangan */}
             <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm mt-4">
-              <div className="text-sm md:text-base font-semibold mb-3 text-[#4A4A40]">Metrik Usaha</div>
+              <div className="text-sm md:text-base font-semibold mb-3 text-[#4A4A40]" style={{ fontFamily: "Arial", fontWeight: "bold" }}>Metrik Usaha</div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {[
-                  { lbl: "Gross Profit Margin", val: `${margin}%`, desc: "Laba / Pendapatan", good: parseFloat(margin.toString()) >= 20 },
-                  { lbl: "Biaya vs Pendapatan", val: totalMasuk > 0 ? `${((totalKeluar / totalMasuk) * 100).toFixed(1)}%` : "—", desc: "Pengeluaran / Pendapatan", good: (totalKeluar / totalMasuk) < 0.8 },
-                  { lbl: "Jumlah Transaksi Masuk", val: txns.filter(t => t.type === "masuk").length, desc: "Entri pendapatan", good: true },
-                  { lbl: "Rata-rata per Transaksi", val: txns.length > 0 ? fmtS(Math.round((totalMasuk + totalKeluar) / txns.length)) : "—", desc: "Nilai rata-rata dari total", good: true },
+                  { lbl: "Gross Profit Margin", val: `${margin}%`, desc: "Laba / Pendapatan", good: parseFloat(margin.toString()) >= 20, lblCol: "#ffffff", valCol: "#ffffff", descCol: "#ffffff", bgCol: "#368ccd" },
+                  { lbl: "Biaya vs Pendapatan", val: totalMasuk > 0 ? `${((totalKeluar / totalMasuk) * 100).toFixed(1)}%` : "—", desc: "Pengeluaran / Pendapatan", good: (totalKeluar / totalMasuk) < 0.8, lblCol: "#ffffff", valCol: "#ffffff", descCol: "#ffffff", bgCol: "#368ccd" },
+                  { lbl: "Jumlah Transaksi Masuk", val: txns.filter(t => t.type === "masuk").length, desc: "Entri pendapatan", good: true, lblCol: "#ffffff", valCol: "#ffffff", descCol: "#ffffff", bgCol: "#368ccd" },
+                  { lbl: "Rata-rata per Transaksi", val: txns.length > 0 ? fmtS(Math.round((totalMasuk + totalKeluar) / txns.length)) : "—", desc: "Nilai rata-rata dari total", good: true, lblCol: "#ffffff", valCol: "#ffffff", descCol: "#ffffff", bgCol: "#368ccd" },
                 ].map((r, i) => (
-                  <div key={i} className={`rounded-[24px] p-3.5 md:p-4 border ${r.good ? "bg-[#FAF9F6] border-[#E8E6DB]" : "bg-[#F0EEE4] border-[#F0EEE4]"}`}>
-                    <div className="text-[11px] md:text-[12px] text-[#A5A58D] mb-1.5">{r.lbl}</div>
-                    <div className={`text-[18px] md:text-[20px] font-bold tracking-[-0.5px] ${r.good ? "text-[#6B705C]" : "text-[#B18B5E]"}`}>{r.val}</div>
-                    <div className={`text-[10px] md:text-[11px] mt-1.5 font-medium ${r.good ? "text-[#6B705C]" : "text-[#B18B5E]"}`}>{r.desc}</div>
+                  <div key={i} className={`rounded-[24px] p-3.5 md:p-4 border ${r.good ? "bg-[#FAF9F6] border-[#E8E6DB]" : "bg-[#F0EEE4] border-[#F0EEE4]"}`} style={{ backgroundColor: r.bgCol || undefined, color: r.bgCol ? r.bgCol : undefined }}>
+                    <div className="text-[11px] md:text-[12px] text-[#A5A58D] mb-1.5" style={{ color: r.lblCol || undefined, fontWeight: r.lblCol ? "bold" : undefined }}>{r.lbl}</div>
+                    <div className={`text-[18px] md:text-[20px] font-bold tracking-[-0.5px] ${r.good ? "text-[#6B705C]" : "text-[#B18B5E]"}`} style={{ color: r.valCol || undefined }}>{r.val}</div>
+                    <div className={`text-[10px] md:text-[11px] mt-1.5 font-medium ${r.good ? "text-[#6B705C]" : "text-[#B18B5E]"}`} style={{ color: r.descCol || undefined }}>{r.desc}</div>
                   </div>
                 ))}
               </div>
@@ -1719,21 +1966,21 @@ export default function App() {
 
         {laporanTab === "gl" && (
           <div className="bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm print:shadow-none print:border-none print:m-0 print:p-0">
-            <div className="text-base font-semibold mb-4 text-[#4A4A40]">Buku Besar (General Ledger)</div>
+            <div className="text-base font-semibold mb-4 text-[#4A4A40]" style={{ fontFamily: "Arial" }}>Buku Besar (General Ledger)</div>
             <div className="text-[13px] text-[#A5A58D] mb-4">Pengelompokan transaksi berdasarkan kategori / akun (Chart of Accounts).</div>
             <div className="flex gap-4 overflow-x-auto pb-4 custom-scrollbar">
               {[...new Set(filteredTxns.map(t => t.cat))].map(c => (
-                <div key={c} className="min-w-[260px] md:min-w-[300px] border border-[#DCD9CC] rounded-xl p-4 bg-[#FAF9F6] shrink-0">
-                  <div className="font-bold text-[#4A4A40] mb-3 border-b border-[#DCD9CC] pb-2">{c}</div>
+                <div key={c} className="min-w-[260px] md:min-w-[300px] border border-[#DCD9CC] rounded-xl p-4 shrink-0" style={{ backgroundColor: "#ffffff" }}>
+                  <div className="font-bold pb-3 border-b border-[#DCD9CC]" style={{ color: "#000000" }}>{c}</div>
                   {filteredTxns.filter(t => t.cat === c).map(t => (
-                    <div key={t.id} className="flex flex-col py-2 border-b border-dashed border-[#DCD9CC] last:border-0">
+                    <div key={t.id} className="flex flex-col py-2 border-b border-dashed border-[#DCD9CC] last:border-0" style={{ color: "#000000" }}>
                       <div className="flex justify-between text-[12px]">
-                        <span className="text-[#A5A58D]">{new Date(t.date).toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })}</span>
-                        <span className={t.type === 'masuk' ? 'text-[#6B705C] font-semibold' : 'text-[#B18B5E] font-semibold'}>
+                        <span className="text-[#A5A58D]" style={{ color: "inherit" }}>{new Date(t.date).toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                        <span className={t.type === 'masuk' ? 'font-semibold' : 'font-semibold'} style={{ color: "inherit" }}>
                           {t.type === 'masuk' ? '+' : '-'}{fmt(t.amount)}
                         </span>
                       </div>
-                      <div className="text-[11px] text-[#A5A58D] italic truncate mt-1">{t.desc}</div>
+                      <div className="text-[11px] italic truncate mt-1" style={{ color: "inherit" }}>{t.desc}</div>
                     </div>
                   ))}
                   <div className="flex justify-between text-[13px] font-bold mt-2 pt-2 border-t border-[#DCD9CC] text-[#4A4A40]">
@@ -1772,18 +2019,18 @@ export default function App() {
         )}
 
         {/* ========== RINCIAN TRANSAKSI UNTUK EDIT/HAPUS (Hanya tampil di Laporan) ========== */}
-        <div className="mt-8 bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm">
-          <div className="text-base font-semibold mb-4 text-[#4A4A40]">Rincian Transaksi ({filterMonth ? filterMonth : "Semua Periode"})</div>
+        <div className="mt-8 bg-white border border-[#DCD9CC] rounded-[16px] md:rounded-[24px] p-4 md:p-6 shadow-sm" style={{ backgroundColor: "#368ccd" }}>
+          <div className="text-base font-semibold mb-4 text-[#4A4A40]" style={{ fontFamily: "Arial", color: "#ffffff" }}>Rincian Transaksi ({filterMonth ? new Date(filterMonth + "-01").toLocaleDateString('id-ID', { year: 'numeric', month: 'long' }) : "Semua Periode"})</div>
           
-          <div className="overflow-x-auto min-h-[200px] pr-1 md:pr-2">
+          <div className="overflow-x-auto min-h-[200px] pr-1 md:pr-2" style={{ backgroundColor: "#ffffff", height: "200px", width: "760px", borderRadius: "20px", borderStyle: "dashed", borderWidth: "-120px", marginLeft: "0px", marginRight: "0px", marginBottom: "0px", paddingRight: "0px" }}>
             <table className="w-full border-collapse text-[12px] md:text-[13px] text-left whitespace-nowrap md:whitespace-normal">
               <thead className="sticky top-0 bg-[#FAF9F6] z-10 shadow-[0_1px_0_#DCD9CC]">
                 <tr>
-                  <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold md:w-[15%]">Tanggal</th>
-                  <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold md:w-[35%] whitespace-normal">Keterangan</th>
-                  <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-right">Debet (Masuk)</th>
-                  <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-right">Kredit (Keluar)</th>
-                  <th className="py-3 px-3 md:px-4 text-[#A5A58D] font-semibold text-center w-[60px]">Aksi</th>
+                  <th className="py-3 px-3 md:px-4 font-semibold md:w-[15%]" style={{ backgroundColor: "#09216c", textAlign: "center", color: "#ffffff" }}>Tanggal</th>
+                  <th className="py-3 px-3 md:px-4 font-semibold md:w-[35%] whitespace-normal" style={{ backgroundColor: "#09216c", textAlign: "center", color: "#ffffff" }}>Keterangan</th>
+                  <th className="py-3 px-3 md:px-4 font-semibold text-right" style={{ backgroundColor: "#09216c", textAlign: "center", color: "#ffffff" }}>Debet (Masuk)</th>
+                  <th className="py-3 px-3 md:px-4 font-semibold text-right" style={{ backgroundColor: "#09216c", textAlign: "center", color: "#ffffff" }}>Kredit (Keluar)</th>
+                  <th className="py-3 px-3 md:px-4 font-semibold text-center w-[60px]" style={{ backgroundColor: "#09216c", color: "#ffffff" }}>Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -1793,8 +2040,8 @@ export default function App() {
                   </tr>
                 ) : (
                   filteredTxns.map((t, index) => (
-                    <tr key={t.id} className={`border-b border-[#E8E6DB] ${index % 2 === 0 ? 'bg-white' : 'bg-[#FAF9F6]'} hover:bg-gray-50`}>
-                      <td className="py-3 px-3 md:px-4 text-[#4A4A40]">{new Date(t.date).toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}</td>
+                    <tr key={t.id} className={`border-b border-[#E8E6DB] ${index % 2 === 0 ? '' : 'bg-[#FAF9F6]'} hover:bg-gray-50`}>
+                      <td className="py-3 px-3 md:px-4 text-[#4A4A40]" style={{ backgroundColor: "#ffffff" }}>{new Date(t.date).toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}</td>
                       <td className="py-3 px-3 md:px-4">
                         <div className="font-medium text-[#4A4A40] w-32 sm:w-auto truncate md:whitespace-normal xl:line-clamp-2">{t.desc}</div>
                         <div className="text-[11px] text-[#A5A58D] mt-1">{t.cat}</div>

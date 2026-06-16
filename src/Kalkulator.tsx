@@ -69,28 +69,28 @@ export function Kalkulator() {
       </div>
 
       <div className="grid grid-cols-4 gap-2 md:gap-3">
-        <button onClick={() => handlePress("C")} className={`${oprClass} col-span-2 text-[#B18B5E]`}>C</button>
-        <button onClick={() => handlePress("DEL")} className={oprClass}>DEL</button>
-        <button onClick={() => handlePress("÷")} className={oprClass}>÷</button>
+        <button onClick={() => handlePress("C")} className={`${oprClass} col-span-2 text-[#B18B5E]`} style={{ color: "#a3a3a3" }}>C</button>
+        <button onClick={() => handlePress("DEL")} className={oprClass} style={{ color: "#a3a3a3" }}>DEL</button>
+        <button onClick={() => handlePress("÷")} className={oprClass} style={{ color: "#a3a3a3" }}>÷</button>
 
         <button onClick={() => handlePress("7")} className={btnClass}>7</button>
         <button onClick={() => handlePress("8")} className={btnClass}>8</button>
         <button onClick={() => handlePress("9")} className={btnClass}>9</button>
-        <button onClick={() => handlePress("x")} className={oprClass}>x</button>
+        <button onClick={() => handlePress("x")} className={oprClass} style={{ color: "#a3a3a3" }}>x</button>
 
         <button onClick={() => handlePress("4")} className={btnClass}>4</button>
         <button onClick={() => handlePress("5")} className={btnClass}>5</button>
         <button onClick={() => handlePress("6")} className={btnClass}>6</button>
-        <button onClick={() => handlePress("-")} className={oprClass}>-</button>
+        <button onClick={() => handlePress("-")} className={oprClass} style={{ color: "#a3a3a3" }}>-</button>
 
         <button onClick={() => handlePress("1")} className={btnClass}>1</button>
         <button onClick={() => handlePress("2")} className={btnClass}>2</button>
         <button onClick={() => handlePress("3")} className={btnClass}>3</button>
-        <button onClick={() => handlePress("+")} className={oprClass}>+</button>
+        <button onClick={() => handlePress("+")} className={oprClass} style={{ color: "#a3a3a3" }}>+</button>
 
         <button onClick={() => handlePress("0")} className={`${btnClass} col-span-2`}>0</button>
         <button onClick={() => handlePress(".")} className={btnClass}>.</button>
-        <button onClick={() => handlePress("=")} className="bg-[#007a07] rounded-xl p-4 text-center font-bold text-white text-lg hover:bg-[#006606] transition-colors cursor-pointer">=</button>
+        <button onClick={() => handlePress("=")} className="rounded-xl p-4 text-center font-bold text-lg hover:bg-[#006606] transition-colors cursor-pointer" style={{ backgroundColor: "#f2f2f2", color: "#000000" }}>=</button>
       </div>
     </div>
   );

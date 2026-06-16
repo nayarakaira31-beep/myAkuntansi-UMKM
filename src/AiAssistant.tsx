@@ -88,9 +88,22 @@ export function AiAssistant({ txns, setTxns, catsMasuk, catsKeluar, onExport }: 
       {/* Tombol Toggle */}
       <button 
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed bottom-6 right-4 md:right-6 w-12 h-12 md:w-14 md:h-14 rounded-full bg-[#6B705C] text-white border-none shadow-lg cursor-pointer flex items-center justify-center text-xl md:text-2xl z-50 transition-transform hover:scale-105 active:scale-95"
+        className="fixed bottom-6 right-4 md:right-6 w-14 h-14 md:w-16 md:h-16 rounded-full border-none shadow-lg cursor-pointer flex items-center justify-center z-50 transition-transform hover:scale-105 active:scale-95 p-0 bg-transparent overflow-hidden"
       >
-        ✨
+        <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-md">
+          {/* Dark blue background */}
+          <circle cx="50" cy="50" r="50" fill="#09216c" />
+          
+          {/* Two 4-pointed stars */}
+          <path d="M 68 25 Q 70 30 75 30 Q 70 30 68 35 Q 68 30 63 30 Q 68 30 68 25 Z" fill="#ffffff" />
+          <path d="M 82 35 Q 84 38 88 38 Q 84 38 82 41 Q 82 38 78 38 Q 82 38 82 35 Z" fill="#ffffff" />
+
+          {/* Cloud */}
+          <path d="M 35 65 Q 20 65 20 50 Q 20 40 30 38 Q 35 25 50 25 Q 65 25 70 38 Q 80 40 80 50 Q 80 65 65 65 Z" fill="#a5d8ff" />
+          
+          {/* "AI" text */}
+          <text x="50" y="58" fontFamily="system-ui, Arial, sans-serif" fontWeight="900" fontSize="26" fill="#ffffff" textAnchor="middle">AI</text>
+        </svg>
       </button>
 
       {/* Jendela Chat */}

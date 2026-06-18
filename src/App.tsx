@@ -653,7 +653,7 @@ export default function App() {
             transition={{ duration: 0.5, delay: 0.4, ease: "easeOut" }}
             className="text-[14px] text-[#A5A58D] tracking-wide"
           >
-            MENGANALISIS KEUANGAN..
+            MENGANALISIS KEUANGAN...
           </motion.p>
         </motion.div>
       </AnimatePresence>
@@ -796,9 +796,7 @@ export default function App() {
                     const user = registeredUsers.find(u => {
                       return u.email === authEmail && (
                         u.password === authPassword || 
-                        u.password === hashedIn || 
-                        !authPassword ||
-                        !u.password
+                        u.password === hashedIn
                       );
                     });
                     if (user) {

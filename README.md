@@ -1,20 +1,42 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# myAkuntansi UMKM
 
-# Run and deploy your AI Studio app
+myAkuntansi UMKM adalah aplikasi pencatatan keuangan sederhana untuk usaha kecil. Aplikasi ini membantu pengguna mencatat kas masuk/keluar, hutang piutang, stok barang, laporan, ekspor CSV, dan ringkasan berbantuan AI.
 
-This contains everything you need to run your app locally.
+## Fitur utama
 
-View your app in AI Studio: https://ai.studio/apps/8857c29f-c7f4-44c5-82d0-23826541ba1f
+- Dashboard ringkas untuk total pemasukan, pengeluaran, laba, dan transaksi.
+- Pencatatan transaksi kas dengan kategori pemasukan dan pengeluaran.
+- Pengelolaan hutang/piutang dan inventori.
+- Laporan laba rugi, neraca, buku besar, pajak UMKM, serta ekspor laporan.
+- Penyimpanan lokal terenkripsi melalui `SecureStorage`.
+- Asisten AI yang dapat memakai konteks transaksi ketika `GEMINI_API_KEY` tersedia.
 
-## Run Locally
+## Menjalankan secara lokal
 
-**Prerequisites:**  Node.js
-
+**Prasyarat:** Node.js 22 atau versi kompatibel.
 
 1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+   ```bash
+   npm install
+   ```
+2. Salin konfigurasi environment bila diperlukan dan isi `GEMINI_API_KEY` untuk fitur AI.
+3. Jalankan aplikasi development:
+   ```bash
+   npm run dev
+   ```
+4. Buka URL lokal yang ditampilkan oleh server.
+
+## Pemeriksaan kualitas
+
+- Type-check:
+  ```bash
+  npm run lint
+  ```
+- Unit test:
+  ```bash
+  npm test
+  ```
+- Build produksi:
+  ```bash
+  npm run build
+  ```
